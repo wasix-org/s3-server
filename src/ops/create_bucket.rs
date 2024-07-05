@@ -38,6 +38,7 @@ impl S3Handler for Handler {
 }
 
 /// extract operation request
+#[allow(unused_qualifications)]
 async fn extract(ctx: &mut ReqContext<'_>) -> S3Result<CreateBucketRequest> {
     let bucket = ctx.unwrap_bucket_path();
 

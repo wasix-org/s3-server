@@ -9,7 +9,6 @@ readme = "README.md"
 description = "An experimental generic S3 server"
 keywords = ["s3"]
 categories = ["web-programming", "web-programming::http-server"]
-rust-version = "1.59"
 
 [features]
 default = []
@@ -17,7 +16,6 @@ binary = [
     "anyhow", 
     "dotenv", 
     "structopt", 
-    "tokio", 
     "tracing-subscriber"
 ]
 
@@ -39,18 +37,18 @@ hex-simd = "0.8.0"
 hmac = "0.12.1"
 http = "0.2.7"
 httparse = "1.7.0"
-hyper = { version = "0.14.18", features = ["server"] }
+hyper = { git = "https://github.com/wasix-org/hyper.git", branch = "v0.14.28", features = ["stream", "http1", "http2", "tcp", "server"] }
 md-5 = "0.10.1"
 memchr = "2.4.1"
 mime = "0.3.16"
 nom = "7.1.1"
 once_cell = "1.10.0"
-path-absolutize = "3.0.13"
+path-absolutize = "=3.0.13"
 pin-project-lite = "0.2.8"
 quick-xml = { version = "0.27.1", features = ["serialize"] }
 regex = "1.5.5"
-rusoto_core = "0.48.0"
-rusoto_s3 = "0.48.0"
+rusoto_core = { git = "https://github.com/wasix-org/rusoto.git", branch = "v0.48.0", version = "=0.48.0" }
+rusoto_s3 = { git = "https://github.com/wasix-org/rusoto.git", branch = "v0.48.0", version = "=0.48.0" }
 serde = "1.0.136"
 serde_json = "1.0.79"
 serde_urlencoded = "0.7.1"
@@ -58,7 +56,7 @@ sha2 = "0.10.2"
 smallvec = "1.8.0"
 structopt = { version = "0.3.26", optional = true }
 thiserror = "1.0.30"
-tokio = { version = "1.17.0", features = ["full"], optional = true }
+tokio = { git = "https://github.com/wasix-org/tokio.git", branch = "wasix-1.35.1", default-features = false, features = ["rt-multi-thread", "macros", "fs", "io-util", "signal"] }
 tracing = "0.1.34"
 tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
@@ -67,6 +65,3 @@ transform-stream = "0.3.0"
 urlencoding = "2.1.0"
 uuid = { version = "1.0.0", features = ["v4"] }
 xml-rs = "0.8.4"
-
-[dev-dependencies]
-tokio = { version = "1.17.0", features = ["full"] }

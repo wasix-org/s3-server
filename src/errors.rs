@@ -502,7 +502,7 @@ pub enum S3ErrorCode {
 
 impl Display for S3ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        <Self as fmt::Debug>::fmt(self, f)
+        Debug::fmt(self, f)
     }
 }
 

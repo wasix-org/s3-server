@@ -43,6 +43,7 @@ impl S3Handler for Handler {
 }
 
 /// extract operation request
+#[allow(unused_qualifications)]
 async fn extract(ctx: &mut ReqContext<'_>) -> S3Result<CompleteMultipartUploadRequest> {
     let multipart_upload: Option<self::xml::CompletedMultipartUpload> =
         deserialize_xml_body(ctx.take_body())

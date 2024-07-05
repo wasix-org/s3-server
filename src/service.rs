@@ -492,7 +492,7 @@ async fn check_header_auth(
                 signature_v4::Payload::MultipleChunks,
             )
         } else {
-            let bytes = std::mem::take(&mut ctx.body)
+            let bytes = mem::take(&mut ctx.body)
                 .apply(hyper::body::to_bytes)
                 .await
                 .map_err(|err| invalid_request!("Can not obtain the whole request body.", err))?;

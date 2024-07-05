@@ -39,6 +39,7 @@ impl S3Handler for Handler {
 }
 
 /// extract operation request
+#[allow(unused_qualifications)]
 pub async fn extract(ctx: &mut ReqContext<'_>) -> S3Result<DeleteObjectsRequest> {
     let bucket = ctx.unwrap_bucket_path();
     let delete: self::xml::Delete = deserialize_xml_body(ctx.take_body())
