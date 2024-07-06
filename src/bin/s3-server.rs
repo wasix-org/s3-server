@@ -21,6 +21,7 @@
 use s3_server::storages::fs::FileSystem;
 use s3_server::S3Service;
 use s3_server::SimpleAuth;
+use tracing::trace;
 
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -78,6 +79,8 @@ fn setup_tracing(args: &Args) {
         .finish()
         .with(ErrorLayer::default())
         .init();
+
+    trace!(?filter);
 }
 
 #[tokio::main]
@@ -88,13 +91,17 @@ async fn main() -> Result<()> {
     setup_tracing(&args);
 
     // setup the storage
+    trace!("Initializing file system ({:?})", args.fs_root);
     let fs = FileSystem::new(&args.fs_root)?;
     debug!(?fs);
 
     // setup the service
+    trace!("S3 service new");
     let mut service = S3Service::new(fs);
 
     if let (Some(access_key), Some(secret_key)) = (args.access_key, args.secret_key) {
+        trace!("Loading access key and secret");
+
         let mut auth = SimpleAuth::new();
         auth.register(access_key, secret_key);
         debug!(?auth);
@@ -103,7 +110,15 @@ async fn main() -> Result<()> {
 
     let server = {
         let service = service.into_shared();
+
+        trace!(
+            "Binding TCP on ({}) with port {}",
+            args.host.as_str(),
+            args.port
+        );
         let listener = TcpListener::bind((args.host.as_str(), args.port))?;
+
+        trace!("Starting S3 service on socket");
         let make_service: _ =
             make_service_fn(move |_| future::ready(Ok::<_, anyhow::Error>(service.clone())));
         Server::from_tcp(listener)?.serve(make_service)

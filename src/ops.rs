@@ -30,9 +30,12 @@ use std::fmt::Debug;
 use std::mem;
 
 use hyper::header::AsHeaderName;
+use tracing::trace;
 
 /// setup handlers
 pub fn setup_handlers() -> Vec<Box<dyn S3Handler + Send + Sync + 'static>> {
+    trace!("Configuring S3 handlers");
+
     /// helper macro
     macro_rules! zst_handlers{
         [$($m:ident,)+] => {vec![$(Box::new($m::Handler),)+]}

@@ -34,7 +34,7 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use hyper::body::Bytes;
 use md5::{Digest, Md5};
 use path_absolutize::Absolutize;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 use uuid::Uuid;
 
 use async_fs::File;
@@ -52,6 +52,7 @@ impl FileSystem {
     /// Returns an `Err` if current working directory is invalid or `root` doesn't exist
     pub fn new(root: impl AsRef<Path>) -> io::Result<Self> {
         let root = env::current_dir()?.join(root).canonicalize()?;
+        trace!("File system root = {:?}", root);
         Ok(Self { root })
     }
 
