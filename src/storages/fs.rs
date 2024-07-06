@@ -29,15 +29,16 @@ use std::env;
 use std::io::{self, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use futures::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufWriter};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use hyper::body::Bytes;
 use md5::{Digest, Md5};
 use path_absolutize::Absolutize;
+use tokio::io::{AsyncWrite, AsyncReadExt, AsyncWriteExt, AsyncSeekExt, BufWriter};
 use tracing::{debug, error, trace};
 use uuid::Uuid;
 
-use async_fs::File;
+use tokio::fs::File;
+use tokio::fs;
 
 /// A S3 storage implementation based on file system
 #[derive(Debug)]
@@ -102,7 +103,7 @@ impl FileSystem {
     ) -> io::Result<Option<HashMap<String, String>>> {
         let path = self.get_metadata_path(bucket, key)?;
         if path.exists() {
-            let content = async_fs::read(&path).await?;
+            let content = fs::read(&path).await?;
             let map = serde_json::from_slice(&content)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             Ok(Some(map))
@@ -121,7 +122,7 @@ impl FileSystem {
         let path = self.get_metadata_path(bucket, key)?;
         let content = serde_json::to_vec(metadata)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        async_fs::write(&path, &content).await
+        fs::write(&path, &content).await
     }
 
     /// get md5 sum
@@ -157,7 +158,7 @@ where
     while let Some(bytes) = stream.next().await {
         let bytes = bytes?;
 
-        let amt_u64 = futures::io::copy_buf(bytes.as_ref(), writer).await?;
+        let amt_u64 = tokio::io::copy_buf(&mut bytes.as_ref(), writer).await?;
         let amt: usize = amt_u64.try_into().unwrap_or_else(|err| {
             panic!(
                 "number overflow: u64 to usize, n = {}, err = {}",
@@ -205,7 +206,7 @@ impl S3Storage for FileSystem {
             return Err(operation_error(err));
         }
 
-        trace_try!(async_fs::create_dir(&path).await);
+        trace_try!(fs::create_dir(&path).await);
 
         let output = CreateBucketOutput::default(); // TODO: handle other fields
         Ok(output)
@@ -229,10 +230,10 @@ impl S3Storage for FileSystem {
         let src_path = trace_try!(self.get_object_path(bucket, key));
         let dst_path = trace_try!(self.get_object_path(&input.bucket, &input.key));
 
-        let file_metadata = trace_try!(async_fs::metadata(&src_path).await);
+        let file_metadata = trace_try!(fs::metadata(&src_path).await);
         let last_modified = time::to_rfc3339(trace_try!(file_metadata.modified()));
 
-        let _ = trace_try!(async_fs::copy(&src_path, &dst_path).await);
+        let _ = trace_try!(fs::copy(&src_path, &dst_path).await);
 
         debug!(
             from = %src_path.display(),
@@ -243,7 +244,7 @@ impl S3Storage for FileSystem {
         let src_metadata_path = trace_try!(self.get_metadata_path(bucket, key));
         if src_metadata_path.exists() {
             let dst_metadata_path = trace_try!(self.get_metadata_path(&input.bucket, &input.key));
-            let _ = trace_try!(async_fs::copy(src_metadata_path, dst_metadata_path).await);
+            let _ = trace_try!(fs::copy(src_metadata_path, dst_metadata_path).await);
         }
 
         let md5_sum = trace_try!(self.get_md5_sum(bucket, key).await);
@@ -266,7 +267,7 @@ impl S3Storage for FileSystem {
         input: DeleteBucketRequest,
     ) -> S3StorageResult<DeleteBucketOutput, DeleteBucketError> {
         let path = trace_try!(self.get_bucket_path(&input.bucket));
-        trace_try!(async_fs::remove_dir_all(path).await);
+        trace_try!(fs::remove_dir_all(path).await);
         Ok(DeleteBucketOutput)
     }
 
@@ -277,13 +278,13 @@ impl S3Storage for FileSystem {
     ) -> S3StorageResult<DeleteObjectOutput, DeleteObjectError> {
         let path = trace_try!(self.get_object_path(&input.bucket, &input.key));
         if input.key.ends_with('/') {
-            let mut dir = trace_try!(async_fs::read_dir(&path).await);
-            let is_empty = dir.next().await.is_none();
+            let mut dir = trace_try!(fs::read_dir(&path).await);
+            let is_empty = dir.next_entry().await.ok().flatten().is_none();
             if is_empty {
-                trace_try!(async_fs::remove_dir(&path).await);
+                trace_try!(fs::remove_dir(&path).await);
             }
         } else {
-            trace_try!(async_fs::remove_file(path).await);
+            trace_try!(fs::remove_file(path).await);
         }
         let output = DeleteObjectOutput::default(); // TODO: handle other fields
         Ok(output)
@@ -304,7 +305,7 @@ impl S3Storage for FileSystem {
 
         let mut deleted: Vec<DeletedObject> = Vec::new();
         for (path, key) in objects {
-            trace_try!(async_fs::remove_file(path).await);
+            trace_try!(fs::remove_file(path).await);
             deleted.push(DeletedObject {
                 key: Some(key),
                 ..DeletedObject::default()
@@ -457,7 +458,7 @@ impl S3Storage for FileSystem {
             return Err(err.into());
         }
 
-        let file_metadata = trace_try!(async_fs::metadata(path).await);
+        let file_metadata = trace_try!(fs::metadata(path).await);
         let last_modified = time::to_rfc3339(trace_try!(file_metadata.modified()));
         let size = file_metadata.len();
 
@@ -480,21 +481,25 @@ impl S3Storage for FileSystem {
     ) -> S3StorageResult<ListBucketsOutput, ListBucketsError> {
         let mut buckets = Vec::new();
 
-        let mut iter = trace_try!(async_fs::read_dir(&self.root).await);
-        while let Some(entry) = iter.next().await {
-            let entry = trace_try!(entry);
-            let file_type = trace_try!(entry.file_type().await);
-            if file_type.is_dir() {
-                let file_name = entry.file_name();
-                let name = file_name.to_string_lossy();
-                if S3Path::check_bucket_name(&*name) {
-                    let file_meta = trace_try!(entry.metadata().await);
-                    let creation_date = trace_try!(file_meta.created());
-                    buckets.push(Bucket {
-                        creation_date: Some(time::to_rfc3339(creation_date)),
-                        name: Some(name.into()),
-                    });
+        let mut iter = trace_try!(fs::read_dir(&self.root).await);
+        loop {
+            let entry = trace_try!(iter.next_entry().await);
+            if let Some(entry) = entry {
+                let file_type = trace_try!(entry.file_type().await);
+                if file_type.is_dir() {
+                    let file_name = entry.file_name();
+                    let name = file_name.to_string_lossy();
+                    if S3Path::check_bucket_name(&*name) {
+                        let file_meta = trace_try!(entry.metadata().await);
+                        let creation_date = trace_try!(file_meta.created());
+                        buckets.push(Bucket {
+                            creation_date: Some(time::to_rfc3339(creation_date)),
+                            name: Some(name.into()),
+                        });
+                    }
                 }
+            } else {
+                break;
             }
         }
 
@@ -517,33 +522,37 @@ impl S3Storage for FileSystem {
         dir_queue.push_back(path.clone());
 
         while let Some(dir) = dir_queue.pop_front() {
-            let mut entries = trace_try!(async_fs::read_dir(dir).await);
-            while let Some(entry) = entries.next().await {
-                let entry = trace_try!(entry);
-                let file_type = trace_try!(entry.file_type().await);
-                if file_type.is_dir() {
-                    dir_queue.push_back(entry.path());
-                } else {
-                    let file_path = entry.path();
-                    let key = trace_try!(file_path.strip_prefix(&path));
-                    if let Some(ref prefix) = input.prefix {
-                        if !key.to_string_lossy().as_ref().starts_with(prefix) {
-                            continue;
+            let mut entries = trace_try!(fs::read_dir(dir).await);
+            loop {
+                let entry = trace_try!(entries.next_entry().await);
+                if let Some(entry) = entry {
+                    let file_type = trace_try!(entry.file_type().await);
+                    if file_type.is_dir() {
+                        dir_queue.push_back(entry.path());
+                    } else {
+                        let file_path = entry.path();
+                        let key = trace_try!(file_path.strip_prefix(&path));
+                        if let Some(ref prefix) = input.prefix {
+                            if !key.to_string_lossy().as_ref().starts_with(prefix) {
+                                continue;
+                            }
                         }
+
+                        let metadata = trace_try!(entry.metadata().await);
+                        let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
+                        let size = metadata.len();
+
+                        objects.push(Object {
+                            e_tag: None,
+                            key: Some(key.to_string_lossy().into()),
+                            last_modified: Some(last_modified),
+                            owner: None,
+                            size: Some(trace_try!(size.try_into())),
+                            storage_class: None,
+                        });
                     }
-
-                    let metadata = trace_try!(entry.metadata().await);
-                    let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
-                    let size = metadata.len();
-
-                    objects.push(Object {
-                        e_tag: None,
-                        key: Some(key.to_string_lossy().into()),
-                        last_modified: Some(last_modified),
-                        owner: None,
-                        size: Some(trace_try!(size.try_into())),
-                        storage_class: None,
-                    });
+                } else {
+                    break;
                 }
             }
         }
@@ -583,33 +592,37 @@ impl S3Storage for FileSystem {
         dir_queue.push_back(path.clone());
 
         while let Some(dir) = dir_queue.pop_front() {
-            let mut entries = trace_try!(async_fs::read_dir(dir).await);
-            while let Some(entry) = entries.next().await {
-                let entry = trace_try!(entry);
-                let file_type = trace_try!(entry.file_type().await);
-                if file_type.is_dir() {
-                    dir_queue.push_back(entry.path());
-                } else {
-                    let file_path = entry.path();
-                    let key = trace_try!(file_path.strip_prefix(&path));
-                    if let Some(ref prefix) = input.prefix {
-                        if !key.to_string_lossy().as_ref().starts_with(prefix) {
-                            continue;
+            let mut entries = trace_try!(fs::read_dir(dir).await);
+            loop {
+                let entry = trace_try!(entries.next_entry().await);
+                if let Some(entry) = entry {
+                    let file_type = trace_try!(entry.file_type().await);
+                    if file_type.is_dir() {
+                        dir_queue.push_back(entry.path());
+                    } else {
+                        let file_path = entry.path();
+                        let key = trace_try!(file_path.strip_prefix(&path));
+                        if let Some(ref prefix) = input.prefix {
+                            if !key.to_string_lossy().as_ref().starts_with(prefix) {
+                                continue;
+                            }
                         }
+
+                        let metadata = trace_try!(entry.metadata().await);
+                        let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
+                        let size = metadata.len();
+
+                        objects.push(Object {
+                            e_tag: None,
+                            key: Some(key.to_string_lossy().into()),
+                            last_modified: Some(last_modified),
+                            owner: None,
+                            size: Some(trace_try!(size.try_into())),
+                            storage_class: None,
+                        });
                     }
-
-                    let metadata = trace_try!(entry.metadata().await);
-                    let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
-                    let size = metadata.len();
-
-                    objects.push(Object {
-                        e_tag: None,
-                        key: Some(key.to_string_lossy().into()),
-                        last_modified: Some(last_modified),
-                        owner: None,
-                        size: Some(trace_try!(size.try_into())),
-                        storage_class: None,
-                    });
+                } else {
+                    break;
                 }
             }
         }
@@ -671,7 +684,7 @@ impl S3Storage for FileSystem {
         if key.ends_with('/') {
             if content_length == Some(0) {
                 let object_path = trace_try!(self.get_object_path(&bucket, &key));
-                trace_try!(async_fs::create_dir_all(&object_path).await);
+                trace_try!(fs::create_dir_all(&object_path).await);
                 let output = PutObjectOutput::default();
                 return Ok(output);
             }
@@ -684,7 +697,7 @@ impl S3Storage for FileSystem {
 
         let object_path = trace_try!(self.get_object_path(&bucket, &key));
         if let Some(dir_path) = object_path.parent() {
-            trace_try!(async_fs::create_dir_all(&dir_path).await);
+            trace_try!(fs::create_dir_all(&dir_path).await);
         }
 
         let mut md5_hash = Md5::new();
@@ -822,7 +835,7 @@ impl S3Storage for FileSystem {
 
             let mut reader = trace_try!(File::open(&part_path).await);
             let (ret, duration) =
-                time::count_duration(futures::io::copy(&mut reader, &mut writer)).await;
+                time::count_duration(tokio::io::copy(&mut reader, &mut writer)).await;
             let size = trace_try!(ret);
 
             debug!(
@@ -832,11 +845,11 @@ impl S3Storage for FileSystem {
                 ?duration,
                 "CompleteMultipartUpload: write file",
             );
-            trace_try!(async_fs::remove_file(&part_path).await);
+            trace_try!(fs::remove_file(&part_path).await);
         }
         drop(writer);
 
-        let file_size = trace_try!(async_fs::metadata(&object_path).await).len();
+        let file_size = trace_try!(fs::metadata(&object_path).await).len();
 
         let (md5_sum, duration) = {
             let (ret, duration) = time::count_duration(self.get_md5_sum(&bucket, &key)).await;
