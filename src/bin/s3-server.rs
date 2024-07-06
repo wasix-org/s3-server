@@ -30,7 +30,7 @@ use futures::future;
 use hyper::server::Server;
 use hyper::service::make_service_fn;
 use structopt::StructOpt;
-use structopt_flags::{LogLevel, GetWithDefault};
+use structopt_flags::{GetWithDefault, LogLevel};
 use tracing::{debug, info};
 
 #[derive(StructOpt)]
