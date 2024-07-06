@@ -51,7 +51,13 @@ impl FileSystem {
     /// # Errors
     /// Returns an `Err` if current working directory is invalid or `root` doesn't exist
     pub fn new(root: impl AsRef<Path>) -> io::Result<Self> {
-        let root = env::current_dir()?.join(root).canonicalize()?;
+        let mut root = env::current_dir()
+            .unwrap_or_else(|_| PathBuf::new())
+            .join(root);
+        root = match root.canonicalize() {
+            Ok(r) => r,
+            Err(_) => root,
+        };
         trace!("File system root = {:?}", root);
         Ok(Self { root })
     }

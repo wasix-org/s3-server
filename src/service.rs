@@ -160,7 +160,9 @@ impl S3Service {
             multipart: None,
         };
 
-        check_signature(&mut ctx, self.auth.as_deref()).await?;
+        if self.auth.is_some() {
+            check_signature(&mut ctx, self.auth.as_deref()).await?;
+        }
 
         if ctx.req.method() == Method::POST && ctx.path.is_object() && ctx.multipart.is_some() {
             return Err(code_error!(

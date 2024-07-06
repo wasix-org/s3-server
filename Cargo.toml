@@ -67,3 +67,20 @@ transform-stream = "0.3.0"
 urlencoding = "2.1.0"
 uuid = { version = "1.0.0", features = ["v4"] }
 xml-rs = "0.8.4"
+
+[profile.dev]
+codegen-units = 1
+debug = false
+debug-assertions = false
+opt-level = 3
+panic = "abort"
+
+[profile.release]
+codegen-units = 1
+debug = false
+debug-assertions = false
+lto = "fat"
+opt-level = 3
+panic = "abort"
+rpath = false
+strip = true
