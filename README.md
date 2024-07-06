@@ -50,7 +50,7 @@ FLAGS:
 OPTIONS:
         --fs-root <fs-root>           [default: .]
         --host <host>                 [default: localhost]
-        --port <port>                 [default: 8014]
+        --port <port>                 [default: 8080]
         --access-key <access-key>    
         --secret-key <secret-key>
 ```
