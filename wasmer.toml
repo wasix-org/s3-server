@@ -1,0 +1,13 @@
+[package]
+name = "john-sharratt/s3-server"
+version = "0.2.2"
+description = "S3 server using durable instances."
+
+[[module]]
+name = "s3-server"
+source = "./target/wasm32-wasmer-wasi/debug/s3-server.wasm"
+
+[[command]]
+name = "s3-server"
+module = "s3-server"
+runner = "wasi"
