@@ -5,6 +5,7 @@ use crate::data_structures::{OrderedHeaders, OrderedQs};
 use crate::errors::{S3AuthError, S3ErrorCode, S3Result};
 use crate::headers::{AmzContentSha256, AmzDate, AuthorizationV4, CredentialV4};
 use crate::headers::{AUTHORIZATION, CONTENT_TYPE, X_AMZ_CONTENT_SHA256, X_AMZ_DATE};
+use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN};
 use crate::ops::{ReqContext, S3Handler};
 use crate::output::S3Output;
 use crate::path::{S3Path, S3PathErrorKind};
@@ -28,6 +29,40 @@ use futures::stream::{Stream, StreamExt};
 use hyper::body::Bytes;
 
 use tracing::{debug, error};
+
+
+use hyper::StatusCode;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
+
+
+use std::path::PathBuf;
+
+async fn serve_file(req: Request) -> S3Result<Response> {
+    let path = req.uri().path().trim_start_matches("/_fe/");
+    let mut file_path = PathBuf::from("/fe/");
+    file_path.push(path);
+    if file_path.is_dir() {
+        file_path.push("index.html");
+    }
+
+    match File::open(&file_path).await {
+        Ok(mut file) => {
+            let mut contents = vec![];
+            let _ = file.read_to_end(&mut contents).await.unwrap();
+
+            Ok(Response::new(Body::from(contents)))
+        }
+        Err(_) => {
+            let mut not_found = Response::default();
+            *not_found.status_mut() = StatusCode::NOT_FOUND;
+            Ok(not_found)
+        }
+    }
+}
+
+
+
 
 /// S3 service
 pub struct S3Service {
@@ -126,6 +161,10 @@ impl S3Service {
     )]
     pub async fn hyper_call(&self, req: Request) -> Result<Response, BoxStdError> {
         debug!("req = \n{:#?}", req);
+        // if path is /_fe, return service_file
+        if req.uri().path().starts_with("/_fe/") {
+            return Ok(serve_file(req).await?);
+        }
         let ret = match self.handle(req).await {
             Ok(resp) => Ok(resp),
             Err(err) => err.into_xml_response().try_into_response(),
@@ -136,7 +175,11 @@ impl S3Service {
             Err(ref err) => error!(%err),
         };
 
-        Ok(ret?)
+        let mut res = ret?;
+        let _ = res.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+        let _ = res.headers_mut().insert(ACCESS_CONTROL_ALLOW_METHODS, HeaderValue::from_static("GET, PUT, POST, DELETE, HEAD, OPTIONS"));
+        let _ = res.headers_mut().insert(ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("*"));
+        Ok(res)
     }
 
     /// handle a request
@@ -453,7 +496,7 @@ async fn check_header_auth(
             a.signed_headers.sort_unstable();
             a
         } else {
-            if auth.is_some() {
+            if ctx.req.method() != "OPTIONS" && auth.is_some() {
                 return Err(code_error!(AccessDenied, "Access Denied"));
             }
             return Ok(());

@@ -12,7 +12,7 @@
 //!         --fs-root <fs-root>           [default: .]
 //!         --host <host>                 [default: localhost]
 //!         --port <port>                 [default: 8080]
-//!         --access-key <access-key>    
+//!         --access-key <access-key>
 //!         --secret-key <secret-key>
 //! ```
 
@@ -34,21 +34,24 @@ use structopt::StructOpt;
 use structopt_flags::LogLevel;
 use tracing::{debug, info};
 
+
+
+
 #[derive(StructOpt)]
 struct Args {
-    #[structopt(long, default_value = ".")]
+    #[structopt(long, default_value = ".", env = "FS_ROOT")]
     fs_root: PathBuf,
 
-    #[structopt(long, default_value = "localhost")]
+    #[structopt(long, default_value = "localhost", env = "HOST")]
     host: String,
 
-    #[structopt(long, default_value = "8080")]
+    #[structopt(long, default_value = "8080", env = "PORT")]
     port: u16,
 
-    #[structopt(long, requires("secret-key"), display_order = 1000)]
+    #[structopt(long, requires("secret-key"), display_order = 1000, env = "ACCESS_KEY")]
     access_key: Option<String>,
 
-    #[structopt(long, requires("access-key"), display_order = 1000)]
+    #[structopt(long, requires("access-key"), display_order = 1000, env = "SECRET_KEY")]
     secret_key: Option<String>,
 
     #[structopt(flatten)]
