@@ -1,7 +1,10 @@
 [package]
-name = "john-sharratt/s3-server"
-version = "0.2.2"
 description = "S3 server using durable instances."
+
+[fs]
+"/fe" = "./src/fe"
+"/bucket-1" = "./bucket-1"
+"/bucket-2" = "./bucket-2"
 
 [[module]]
 name = "s3-server"
