@@ -159,3 +159,11 @@ pub(crate) type BoxStdError = Box<dyn std::error::Error + Send + Sync + 'static>
 pub(crate) use async_trait::async_trait;
 pub(crate) use hyper::{Body, Method, StatusCode};
 pub(crate) use mime::Mime;
+
+// I feel *TERRIBLE* about introducing such a hack into such an otherwise well-written code base.
+// The ops don't receive any kind of configuration by default, which means this is the easiest way
+// way to achieve this functionality short of commenting code out. There, I said it. Now, let's get
+// stuff working.
+#[allow(missing_docs)]
+pub static DISALLOW_BUCKET_MANIPULATION: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);

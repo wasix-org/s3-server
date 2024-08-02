@@ -53,6 +53,9 @@ struct Args {
 
     #[structopt(flatten)]
     verbose: structopt_flags::QuietVerbose,
+
+    #[structopt(long)]
+    allow_bucket_manipulation: bool,
 }
 
 fn setup_tracing(args: &Args) {
@@ -107,6 +110,11 @@ async fn main() -> Result<()> {
         debug!(?auth);
         service.set_auth(auth);
     }
+
+    s3_server::DISALLOW_BUCKET_MANIPULATION.store(
+        !args.allow_bucket_manipulation,
+        std::sync::atomic::Ordering::Relaxed,
+    );
 
     let server = {
         let service = service.into_shared();
