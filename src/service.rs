@@ -49,7 +49,12 @@ async fn serve_file(req: Request) -> S3Result<Response> {
     match File::open(&file_path).await {
         Ok(mut file) => {
             let mut contents = vec![];
-            let _ = file.read_to_end(&mut contents).await.unwrap();
+            let _ = file.read_to_end(&mut contents).await.or_else(|e| {
+                Err(code_error!(
+                    InternalError,
+                    format!("Failed to read file: {:?}", e)
+                ))
+            })?;
 
             Ok(Response::new(Body::from(contents)))
         }
