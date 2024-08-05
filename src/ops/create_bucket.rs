@@ -31,9 +31,13 @@ impl S3Handler for Handler {
         ctx: &mut ReqContext<'_>,
         storage: &(dyn S3Storage + Send + Sync),
     ) -> S3Result<Response> {
-        let input = extract(ctx).await?;
-        let output = storage.create_bucket(input).await;
-        output.try_into_response()
+        if crate::DISALLOW_BUCKET_MANIPULATION.load(std::sync::atomic::Ordering::Relaxed) {
+            S3Result::Err(invalid_request!("Bucket creation is not allowed"))
+        } else {
+            let input = extract(ctx).await?;
+            let output = storage.create_bucket(input).await;
+            output.try_into_response()
+        }
     }
 }
 
