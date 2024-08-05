@@ -32,8 +32,8 @@ let hardcoded_settings = {
                 "code": ""
             },
             "cred": {
-                "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
-                "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                "accessKeyId": "",
+                "secretAccessKey": "",
                 "sessionToken": ""
             },
             "stscred": null,
