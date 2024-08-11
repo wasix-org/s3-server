@@ -34,9 +34,6 @@ use structopt::StructOpt;
 use structopt_flags::LogLevel;
 use tracing::{debug, info};
 
-
-
-
 #[derive(StructOpt)]
 struct Args {
     #[structopt(long, default_value = ".", env = "FS_ROOT")]

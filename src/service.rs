@@ -5,7 +5,6 @@ use crate::data_structures::{OrderedHeaders, OrderedQs};
 use crate::errors::{S3AuthError, S3ErrorCode, S3Result};
 use crate::headers::{AmzContentSha256, AmzDate, AuthorizationV4, CredentialV4};
 use crate::headers::{AUTHORIZATION, CONTENT_TYPE, X_AMZ_CONTENT_SHA256, X_AMZ_DATE};
-use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN};
 use crate::ops::{ReqContext, S3Handler};
 use crate::output::S3Output;
 use crate::path::{S3Path, S3PathErrorKind};
@@ -15,6 +14,10 @@ use crate::streams::aws_chunked_stream::AwsChunkedStream;
 use crate::streams::multipart::{self, Multipart};
 use crate::utils::{crypto, Apply};
 use crate::{Body, BoxStdError, Method, Mime, Request, Response};
+use hyper::header::{
+    HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+    ACCESS_CONTROL_ALLOW_ORIGIN,
+};
 
 use std::borrow::Cow;
 use std::fmt::{self, Debug};
@@ -30,11 +33,9 @@ use hyper::body::Bytes;
 
 use tracing::{debug, error};
 
-
 use hyper::StatusCode;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
-
 
 use std::path::PathBuf;
 
@@ -65,9 +66,6 @@ async fn serve_file(req: Request) -> S3Result<Response> {
         }
     }
 }
-
-
-
 
 /// S3 service
 pub struct S3Service {
@@ -181,9 +179,16 @@ impl S3Service {
         };
 
         let mut res = ret?;
-        let _ = res.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
-        let _ = res.headers_mut().insert(ACCESS_CONTROL_ALLOW_METHODS, HeaderValue::from_static("GET, PUT, POST, DELETE, HEAD, OPTIONS"));
-        let _ = res.headers_mut().insert(ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("*"));
+        let _ = res
+            .headers_mut()
+            .insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+        let _ = res.headers_mut().insert(
+            ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static("GET, PUT, POST, DELETE, HEAD, OPTIONS"),
+        );
+        let _ = res
+            .headers_mut()
+            .insert(ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("*"));
         Ok(res)
     }
 
