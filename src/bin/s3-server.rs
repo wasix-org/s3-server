@@ -36,19 +36,29 @@ use tracing::{debug, info};
 
 #[derive(StructOpt)]
 struct Args {
-    #[structopt(long, default_value = ".", env = "FS_ROOT")]
+    #[structopt(long, default_value = "/s3", env = "WASMER_APP_S3_FS_ROOT")]
     fs_root: PathBuf,
 
-    #[structopt(long, default_value = "localhost", env = "HOST")]
+    #[structopt(long, default_value = "localhost", env = "WASMER_APP_S3_HOST")]
     host: String,
 
-    #[structopt(long, default_value = "8080", env = "PORT")]
+    #[structopt(long, default_value = "80", env = "WASMER_APP_S3_PORT")]
     port: u16,
 
-    #[structopt(long, requires("secret-key"), display_order = 1000, env = "ACCESS_KEY")]
+    #[structopt(
+        long,
+        requires("secret-key"),
+        display_order = 1000,
+        env = "WASMER_APP_S3_ACCESS_KEY"
+    )]
     access_key: Option<String>,
 
-    #[structopt(long, requires("access-key"), display_order = 1000, env = "SECRET_KEY")]
+    #[structopt(
+        long,
+        requires("access-key"),
+        display_order = 1000,
+        env = "WASMER_APP_S3_SECRET_KEY"
+    )]
     secret_key: Option<String>,
 
     #[structopt(flatten)]
