@@ -121,10 +121,7 @@ async fn main() -> Result<()> {
         service.set_auth(auth);
     }
 
-    s3_server::DISALLOW_BUCKET_MANIPULATION.store(
-        !args.allow_bucket_manipulation,
-        std::sync::atomic::Ordering::Relaxed,
-    );
+    s3_server::DISALLOW_BUCKET_MANIPULATION.store(false, std::sync::atomic::Ordering::Relaxed);
 
     let server = {
         let service = service.into_shared();
