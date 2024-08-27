@@ -9,7 +9,7 @@ fn rclone_ls() {
             "--s3-secret-access-key",
             "secret-access-key",
             "--s3-endpoint",
-            "http://localhost:8080"
+            "http://localhost:8080",
         ])
         .output()
         .unwrap();

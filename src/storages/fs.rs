@@ -33,12 +33,12 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use hyper::body::Bytes;
 use md5::{Digest, Md5};
 use path_absolutize::Absolutize;
-use tokio::io::{AsyncWrite, AsyncReadExt, AsyncWriteExt, AsyncSeekExt, BufWriter};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufWriter};
 use tracing::{debug, error, trace};
 use uuid::Uuid;
 
-use tokio::fs::File;
 use tokio::fs;
+use tokio::fs::File;
 
 /// A S3 storage implementation based on file system
 #[derive(Debug)]
