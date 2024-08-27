@@ -46,7 +46,7 @@ impl<R: tokio::io::AsyncRead> Stream for BytesStream<R> {
         let ret: io::Result<usize> = futures::ready!(this.reader.poll_read(cx, &mut read_buf))
             .map(|_| read_buf.filled().len());
         let ans: Option<io::Result<Bytes>> = match ret {
-            Ok(n) if n == 0 => None,
+            Ok(0) => None,
             Ok(n) => {
                 let nread = n.min(buf_len);
                 this.buf.truncate(nread);

@@ -201,7 +201,7 @@ pub fn create_canonical_request(
             // <CanonicalQueryString>\n
             let encoded_query_strings: SmallVec<[(String, String); 16]> = query_strings
                 .iter()
-                .map(|&(ref n, ref v)| {
+                .map(|(n, v)| {
                     let name = String::with_capacity(n.as_ref().len())
                         .also(|s| uri_encode(s, n.as_ref(), true));
                     let value = String::with_capacity(v.as_ref().len())
@@ -213,12 +213,12 @@ pub fn create_canonical_request(
 
             if let Some((first, remain)) = encoded_query_strings.split_first() {
                 {
-                    let &(ref name, ref value) = first;
+                    let (name, value) = first;
                     ans.push_str(name);
                     ans.push('=');
                     ans.push_str(value);
                 }
-                for &(ref name, ref value) in remain {
+                for (name, value) in remain {
                     ans.push('&');
                     ans.push_str(name);
                     ans.push('=');
@@ -387,7 +387,7 @@ pub fn create_presigned_canonical_request(
             // <CanonicalQueryString>\n
             let encoded_query_strings: SmallVec<[(String, String); 16]> = query_strings
                 .iter()
-                .filter_map(|&(ref n, ref v)| {
+                .filter_map(|(n, v)| {
                     if is_skipped_query_string(n.as_ref()) {
                         return None;
                     }
@@ -402,12 +402,12 @@ pub fn create_presigned_canonical_request(
 
             if let Some((first, remain)) = encoded_query_strings.split_first() {
                 {
-                    let &(ref name, ref value) = first;
+                    let (name, value) = first;
                     ans.push_str(name);
                     ans.push('=');
                     ans.push_str(value);
                 }
-                for &(ref name, ref value) in remain {
+                for (name, value) in remain {
                     ans.push('&');
                     ans.push_str(name);
                     ans.push('=');

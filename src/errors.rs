@@ -532,7 +532,7 @@ macro_rules! roundtrip_variant_and_str
         /// Returns a corresponding error code from a string
         /// # Errors
         /// Returns an `Err` if parsing failed
-        pub fn parse_from_str<'a>(s: &'a str) -> Result<Self, ParseS3ErrorCodeError<'a>> {
+        pub fn parse_from_str(s: &str) -> Result<Self, ParseS3ErrorCodeError<'_>> {
             Ok(match s {
                 $(
                    stringify!($v) =>  Self::$v,
