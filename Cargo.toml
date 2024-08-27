@@ -67,6 +67,10 @@ urlencoding = "2.1.0"
 uuid = { version = "1.0.0", features = ["v4"] }
 xml-rs = "0.8.4"
 
+[dev-dependencies]
+anyhow = { version = "1.0.57" }
+tracing-subscriber = { version = "0.3.11", features = ["env-filter", "time"] }
+
 [profile.dev]
 codegen-units = 1
 debug = false

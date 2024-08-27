@@ -24,7 +24,7 @@ jobs:
     - name: Install Tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y git llvm clang make lld curl
+        sudo apt-get install -y git llvm clang make lld curl rclone
     - name: "Install cargo-wasix"
       run: |
         cargo install cargo-wasix
@@ -37,10 +37,28 @@ jobs:
         name: s3-server
         path: target/wasm32-wasmer-wasi/release/s3-server.wasm
 
+  test-wasix:
+    runs-on: ubuntu-22.04    
+    needs: build-wasix
+    name: "Test WASIX"
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Wasmer
+      uses: wasmerio/setup-wasmer@v3.1
+    - name: List contents
+      run: |
+        ls
+    - name: "Create rclone config"
+      run: |
+        mkdir -p ~/.config/rclone
+        printf "[data]\ntype = s3\nprovider = Other\nacl = private\naccess_key_id = access-key-id\nsecret_access_key = secret-access-key\nendpoint = http://localhost:8080" > ~/.config/rclone/rclone.conf
+        cat ~/.config/rclone/rclone.conf
+        ./scripts/wasix-test.sh
+
   publish:
     runs-on: ubuntu-22.04
     # if: ${{ github.ref == 'refs/heads/master' }}
-    needs: build-wasix
+    needs: [build-wasix, test-wasix]
     name: "Publish"
     steps:
     - uses: actions/checkout@v4
