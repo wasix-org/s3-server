@@ -66,6 +66,7 @@ transform-stream = "0.3.0"
 urlencoding = "2.1.0"
 uuid = { version = "1.0.0", features = ["v4"] }
 xml-rs = "0.8.4"
+libc = { version = "=0.2.155", git = "https://github.com/wasix-org/libc", branch = "wasix-0.2.155"}
 
 [dev-dependencies]
 anyhow = { version = "1.0.57" }
@@ -87,3 +88,6 @@ opt-level = 3
 panic = "abort"
 rpath = false
 strip = true
+
+[patch.crates-io]
+libc = { git = "https://github.com/wasix-org/libc.git", branch = "wasix-0.2.155" }
