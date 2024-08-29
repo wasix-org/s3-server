@@ -24,6 +24,7 @@ use std::fmt::{self, Debug};
 use std::io;
 use std::mem;
 use std::ops::Deref;
+use std::str::from_utf8;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -40,13 +41,14 @@ use tokio::io::AsyncReadExt;
 use std::path::PathBuf;
 
 async fn serve_file(req: Request) -> S3Result<Response> {
-    let path = req.uri().path().trim_start_matches("/_fe/");
-    let mut file_path = PathBuf::from("/fe/");
-    file_path.push(path);
+    let path = req.uri().path().trim_start_matches("/").trim_start_matches("_fe/");
+    
+    let mut file_path = PathBuf::from("./src/fe/");
+    // file_path.push(path);
     if file_path.is_dir() {
         file_path.push("index.html");
     }
-
+    
     match File::open(&file_path).await {
         Ok(mut file) => {
             let mut contents = vec![];
@@ -163,9 +165,14 @@ impl S3Service {
         )
     )]
     pub async fn hyper_call(&self, req: Request) -> Result<Response, BoxStdError> {
-        debug!("req = \n{:#?}", req);
+        dbg!("req = \n{:#?}", &req);
         // if path is /_fe, return service_file
-        if req.uri().path().starts_with("/_fe/") {
+        let accept_header = req.headers().get(http::header::ACCEPT);
+        let is_html_req = accept_header
+            .and_then(|value| from_utf8(value.as_bytes()).ok())
+            .map_or(false, |header| header.contains("text/html"));
+
+        if is_html_req {
             return Ok(serve_file(req).await?);
         }
         let ret = match self.handle(req).await {
