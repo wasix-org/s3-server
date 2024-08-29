@@ -16,6 +16,7 @@ mod head_object;
 mod list_buckets;
 mod list_objects;
 mod list_objects_v2;
+mod options;
 mod put_object;
 mod upload_part;
 
@@ -42,6 +43,7 @@ pub fn setup_handlers() -> Vec<Box<dyn S3Handler + Send + Sync + 'static>> {
     }
 
     zst_handlers![
+        options,
         complete_multipart_upload,
         copy_object,
         create_bucket,
