@@ -28,6 +28,9 @@ jobs:
     - name: "Install cargo-wasix"
       run: |
         cargo install cargo-wasix
+    - name: "Download Toolchain"
+      run: |
+        cargo wasix download-toolchain v2024-06-26.1
     - name: "Build"
       run: |
         cargo wasix build --features=binary --release --bin s3-server
