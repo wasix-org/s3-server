@@ -68,7 +68,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-22.04
-    # if: ${{ github.ref == 'refs/heads/master' }}
+    if: ${{ github.ref == 'refs/heads/master' }}
     needs: [build-wasix, test-wasix]
     name: "Publish"
     steps:
