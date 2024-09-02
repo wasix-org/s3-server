@@ -5,7 +5,7 @@ description = "S3 server using durable instances."
 
 [[module]]
 name = "s3-server"
-source = "./target/wasm32-wasmer-wasi/debug/s3-server.wasm"
+source = "s3-server.wasm"
 
 [[command]]
 name = "s3-server"

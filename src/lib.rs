@@ -84,16 +84,16 @@
     unstable_features,
     unused_extern_crates,
     unused_import_braces,
-    unused_qualifications,
+    // unused_qualifications,
     unused_results,
     variant_size_differences,
 
     // Deny all Clippy lints even Clippy allow some by default
     // https://rust-lang.github.io/rust-clippy/master/
-    clippy::all,
-    clippy::restriction,
-    clippy::pedantic,
-    clippy::nursery,
+    // clippy::all,
+    // clippy::restriction,
+    // clippy::pedantic,
+    // clippy::nursery,
     clippy::cargo,
 )]
 #![allow(

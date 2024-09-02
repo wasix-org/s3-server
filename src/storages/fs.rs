@@ -33,12 +33,12 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use hyper::body::Bytes;
 use md5::{Digest, Md5};
 use path_absolutize::Absolutize;
-use tokio::io::{AsyncWrite, AsyncReadExt, AsyncWriteExt, AsyncSeekExt, BufWriter};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufWriter};
 use tracing::{debug, error, trace};
 use uuid::Uuid;
 
-use tokio::fs::File;
 use tokio::fs;
+use tokio::fs::File;
 
 /// A S3 storage implementation based on file system
 #[derive(Debug)]
@@ -67,10 +67,7 @@ impl FileSystem {
     fn get_object_path(&self, bucket: &str, key: &str) -> io::Result<PathBuf> {
         let dir = Path::new(&bucket);
         let file_path = Path::new(&key);
-        let ans = dir
-            .join(&file_path)
-            .absolutize_virtually(&self.root)?
-            .into();
+        let ans = dir.join(file_path).absolutize_virtually(&self.root)?.into();
         Ok(ans)
     }
 
@@ -489,7 +486,7 @@ impl S3Storage for FileSystem {
                 if file_type.is_dir() {
                     let file_name = entry.file_name();
                     let name = file_name.to_string_lossy();
-                    if S3Path::check_bucket_name(&*name) {
+                    if S3Path::check_bucket_name(&name) {
                         let file_meta = trace_try!(entry.metadata().await);
                         let creation_date = trace_try!(file_meta.created());
                         buckets.push(Bucket {

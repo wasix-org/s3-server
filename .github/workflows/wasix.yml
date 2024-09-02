@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-reusable
+  cancel-in-progress: true
+
+jobs:
+  build-wasix:
+    runs-on: ubuntu-22.04
+    name: "Build WASIX"
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Install Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git llvm clang make lld curl rclone
+    - name: "Install cargo-wasix"
+      run: |
+        cargo install cargo-wasix
+    - name: "Download Toolchain"
+      run: |
+        cargo wasix download-toolchain v2024-06-26.1
+    - name: "Build"
+      run: |
+        cargo wasix build --features=binary --release --bin s3-server
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: s3-server
+        path: target/wasm32-wasmer-wasi/release/s3-server.wasm
+
+  test-wasix:
+    runs-on: ubuntu-22.04    
+    needs: build-wasix
+    name: "Test WASIX"
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Wasmer
+      uses: wasmerio/setup-wasmer@v3.1    
+    - name: Download Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: s3-server
+    - name: List contents
+      run: |
+        ls
+    - name: Install Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git llvm clang make lld curl rclone
+    - name: "Create rclone config"
+      run: |
+        mkdir -p ~/.config/rclone
+        printf "[data]\ntype = s3\nprovider = Other\nacl = private\naccess_key_id = access-key-id\nsecret_access_key = secret-access-key\nendpoint = http://localhost:8080" > ~/.config/rclone/rclone.conf
+        cat ~/.config/rclone/rclone.conf
+        RUN_RCLONE=1 ./scripts/wasix-test.sh
+
+  publish:
+    runs-on: ubuntu-22.04
+    if: ${{ github.ref == 'refs/heads/master' }}
+    needs: [build-wasix, test-wasix]
+    name: "Publish"
+    steps:
+    - uses: actions/checkout@v4
+    - name: Download Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: s3-server
+    - name: Setup Wasmer
+      uses: wasmerio/setup-wasmer@v3.1
+    - name: List contents
+      run: |
+        ls
+    - name: "Push"
+      run: |
+        wasmer package push --registry="wasmer.io" --non-interactive --token=${{ secrets.WASMER_CIUSER_PROD_TOKEN }} .
