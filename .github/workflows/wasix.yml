@@ -51,6 +51,10 @@ jobs:
     - name: List contents
       run: |
         ls
+    - name: Install Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git llvm clang make lld curl rclone
     - name: "Create rclone config"
       run: |
         mkdir -p ~/.config/rclone
