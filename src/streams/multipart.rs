@@ -43,7 +43,7 @@ impl Multipart {
         self.fields
             .iter()
             .rev()
-            .find_map(|&(ref n, ref v)| n.eq_ignore_ascii_case(name).then(|| v.as_str()))
+            .find_map(|(n, v)| n.eq_ignore_ascii_case(name).then_some(v.as_str()))
     }
 
     // /// assign from optional field
@@ -214,7 +214,7 @@ where
                 };
 
                 return Ok(Ok(Multipart {
-                    fields: fields.drain(..).collect(),
+                    fields: std::mem::take(fields),
                     file,
                 }));
             }

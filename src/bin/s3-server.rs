@@ -134,7 +134,7 @@ async fn main() -> Result<()> {
         let listener = TcpListener::bind((args.host.as_str(), args.port))?;
 
         trace!("Starting S3 service on socket");
-        let make_service: _ =
+        let make_service =
             make_service_fn(move |_| future::ready(Ok::<_, anyhow::Error>(service.clone())));
         Server::from_tcp(listener)?.serve(make_service)
     };
