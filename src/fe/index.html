@@ -850,13 +850,13 @@
          if (full.CommonPrefix) {
              // DEBUG.log("is folder: " + data);
              if ($scope.view.settings.prefix) {
-                 return '<a data-s3="folder" data-s3key="' + data + '" href="' + object2hrefvirt($scope.view.settings.bucket, data) + '">' + prefix2folder(data) + '</a>';
+                 return '<a data-s3="folder" data-s3key="' + data + '" href="' + object2hrefpath($scope.view.settings.bucket, data) + '">' + prefix2folder(data) + '</a>';
              } else {
-                 return '<a data-s3="folder" data-s3key="' + data + '" href="' + object2hrefvirt($scope.view.settings.bucket, data) + '">' + data + '</a>';
+                 return '<a data-s3="folder" data-s3key="' + data + '" href="' + object2hrefpath($scope.view.settings.bucket, data) + '">' + data + '</a>';
              }
          } else {
              // DEBUG.log("not folder: " + data);
-             return '<a data-s3="object" data-s3key="' + data + '" href="' + object2hrefvirt($scope.view.settings.bucket, data) + '"download="' + fullpath2filename(data) + '">' + fullpath2filename(data) + '</a>';
+             return '<a data-s3="object" data-s3key="' + data + '" href="' + object2hrefpath($scope.view.settings.bucket, data) + '"download="' + fullpath2filename(data) + '">' + fullpath2filename(data) + '</a>';
          }
      };
 
@@ -1252,20 +1252,20 @@
      let prefix = path.includes("/") ?  path.replace(/.*\//, "") : "";
      let access_key = localStorage.getItem("access")
      let secret_key = localStorage.getItem("secret")
-     if (access_key === null || access_key === undefined) {
+
+     if (!access_key || access_key === "undefined") {
          sendAuthRequest().then(authData => {
-             console.log(authData);
              if (authData) {
                  access_key = localStorage.getItem("access") || authData.access;
                  secret_key = localStorage.getItem("secret") || authData.secret;
-                 
+
                  // Optionally save the keys to localStorage
                  localStorage.setItem("access", access_key);
-                 localStorage.setItem("secret", secret_key);             
+                 localStorage.setItem("secret", secret_key);
              } else {
                  access_key = localStorage.getItem("access");
                  secret_key = localStorage.getItem("secret");
-                 
+
                  // Handle the case where no authentication data is available
                  console.warn('No authentication data available.');
              }
@@ -1278,9 +1278,10 @@
                      "accessKeyId": access_key
                  };
              }
+             location.reload();
          });
      }
-     
+
 
      if (access_key === null) {
          $scope.settings.auth = "anon";
@@ -1295,7 +1296,7 @@
      $scope.settings.bucket = bucket;
      $scope.settings.prefix = prefix;
      $scope.settings.entered_bucket = bucket;
-     
+
      // $scope.settings.mfa = { use: 'no', code: '' };
      // $scope.settings.cred = { accessKeyId: '', secretAccessKey: '', sessionToken: '' };
      // $scope.settings.stscred = null;
@@ -1306,7 +1307,7 @@
      // calls and ensure they succeed before closing the modal dialog.
      $scope.update = function() {
          DEBUG.log("Settings updated", $scope.settings);
-         
+
          $('#SettingsModal').modal('hide');
          $scope.settings.bucket = $scope.settings.selected_bucket || $scope.settings.entered_bucket;
 
@@ -1686,7 +1687,10 @@
  // Path-style URLs, ex: https://endpoint_host/mybucket1/index.html
  function object2hrefpath(bucket, key) {
      var enckey = key.split('/').map(function(x) { return encodeURIComponent(x); }).join('/');
-     return document.location.protocol + "//" + ep_host + "/" + bucket + "/" + enckey;
+     let url = document.location.protocol + "//" + ep_host + "/" + bucket + "/" + enckey;
+     let path_url = new URL(url);
+     path_url.searchParams.append("download", true);
+     return path_url.href;
  }
 
  function isfolder(path) {
