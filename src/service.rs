@@ -14,12 +14,17 @@ use crate::streams::aws_chunked_stream::AwsChunkedStream;
 use crate::streams::multipart::{self, Multipart};
 use crate::utils::{crypto, Apply};
 use crate::{Body, BoxStdError, Method, Mime, Request, Response};
+use hyper::header::{
+    HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+    ACCESS_CONTROL_ALLOW_ORIGIN,
+};
 
 use std::borrow::Cow;
 use std::fmt::{self, Debug};
 use std::io;
 use std::mem;
 use std::ops::Deref;
+use std::str::from_utf8;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -28,6 +33,45 @@ use futures::stream::{Stream, StreamExt};
 use hyper::body::Bytes;
 
 use tracing::{debug, error};
+
+use hyper::StatusCode;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
+
+use std::path::PathBuf;
+
+async fn serve_file(req: Request) -> S3Result<Response> {
+    let path = req
+        .uri()
+        .path()
+        .trim_start_matches("/")
+        .trim_start_matches("_fe/");
+
+    let mut file_path = PathBuf::from("/fe/");
+    // file_path.push(path);
+    if file_path.is_dir() {
+        file_path.push("index.html");
+    }
+
+    match File::open(&file_path).await {
+        Ok(mut file) => {
+            let mut contents = vec![];
+            let _ = file.read_to_end(&mut contents).await.or_else(|e| {
+                Err(code_error!(
+                    InternalError,
+                    format!("Failed to read file: {:?}", e)
+                ))
+            })?;
+
+            Ok(Response::new(Body::from(contents)))
+        }
+        Err(_) => {
+            let mut not_found = Response::default();
+            *not_found.status_mut() = StatusCode::NOT_FOUND;
+            Ok(not_found)
+        }
+    }
+}
 
 /// S3 service
 pub struct S3Service {
@@ -125,7 +169,21 @@ impl S3Service {
         )
     )]
     pub async fn hyper_call(&self, req: Request) -> Result<Response, BoxStdError> {
-        debug!("req = \n{:#?}", req);
+        let accept_header = req.headers().get(http::header::ACCEPT);
+        let is_html_req = accept_header
+            .and_then(|value| from_utf8(value.as_bytes()).ok())
+            .map_or(false, |header| header.contains("text/html"));
+
+        let uri = req.uri();
+        let query_params = uri.query().unwrap_or("");
+        let download_param = query_params
+            .split('&')
+            .find(|param| *param == "download=true");
+
+        if is_html_req && download_param.is_none() {
+            dbg!(is_html_req);
+            return Ok(serve_file(req).await?);
+        }
         let ret = match self.handle(req).await {
             Ok(resp) => Ok(resp),
             Err(err) => err.into_xml_response().try_into_response(),
@@ -136,7 +194,18 @@ impl S3Service {
             Err(ref err) => error!(%err),
         };
 
-        Ok(ret?)
+        let mut res = ret?;
+        let _ = res
+            .headers_mut()
+            .insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+        let _ = res.headers_mut().insert(
+            ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static("GET, PUT, POST, DELETE, HEAD, OPTIONS"),
+        );
+        let _ = res
+            .headers_mut()
+            .insert(ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("*"));
+        Ok(res)
     }
 
     /// handle a request
@@ -453,7 +522,7 @@ async fn check_header_auth(
             a.signed_headers.sort_unstable();
             a
         } else {
-            if auth.is_some() {
+            if ctx.req.method() != "OPTIONS" && auth.is_some() {
                 return Err(code_error!(AccessDenied, "Access Denied"));
             }
             return Ok(());

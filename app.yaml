@@ -1,0 +1,16 @@
+kind: wasmer.io/App.v0
+name: s3-server
+owner: ayysadmin
+package: .
+domains:
+  - s3-demo.wasmer.app
+
+volumes:
+  - name: bucket-1
+    mounts:
+      - mount_path: /bucket-1
+      - mount_path: /bucket-2
+
+env:
+  PORT: '80'
+app_id: da_RrWI0t5UGpZ2
