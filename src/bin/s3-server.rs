@@ -18,6 +18,7 @@
 
 #![forbid(unsafe_code)]
 
+use anyhow::Context;
 use s3_server::storages::fs::FileSystem;
 use s3_server::S3Service;
 use s3_server::SimpleAuth;
@@ -26,7 +27,6 @@ use tracing::trace;
 use std::net::TcpListener;
 use std::path::PathBuf;
 
-use anyhow::Result;
 use futures::future;
 use hyper::server::Server;
 use hyper::service::make_service_fn;
@@ -34,7 +34,7 @@ use structopt::StructOpt;
 use structopt_flags::LogLevel;
 use tracing::{debug, info};
 
-#[derive(StructOpt)]
+#[derive(StructOpt, Debug)]
 struct Args {
     #[structopt(long, default_value = "/s3", env = "WASMER_APP_S3_FS_ROOT")]
     fs_root: PathBuf,
@@ -97,15 +97,32 @@ fn setup_tracing(args: &Args) {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     dotenv::dotenv().ok();
 
     let args: Args = Args::from_args();
     setup_tracing(&args);
 
+    match run(args).await {
+        Ok(()) => {
+            tracing::debug!("Server exited successfully");
+        }
+        Err(e) => {
+            eprintln!("Error: {:#?}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn run(args: Args) -> Result<(), anyhow::Error> {
     // setup the storage
     trace!("Initializing file system ({:?})", args.fs_root);
-    let fs = FileSystem::new(&args.fs_root)?;
+    let fs = FileSystem::new(&args.fs_root).with_context(|| {
+        format!(
+            "Failed to initialize file system at '{}'",
+            args.fs_root.display()
+        )
+    })?;
     debug!(?fs);
 
     // setup the service
@@ -131,7 +148,8 @@ async fn main() -> Result<()> {
             args.host.as_str(),
             args.port
         );
-        let listener = TcpListener::bind((args.host.as_str(), args.port))?;
+        let listener = TcpListener::bind((args.host.as_str(), args.port))
+            .with_context(|| format!("Failed to bind to {}:{}", args.host, args.port))?;
 
         trace!("Starting S3 service on socket");
         let make_service =
@@ -140,7 +158,5 @@ async fn main() -> Result<()> {
     };
 
     info!("server is running at http://{}:{}/", args.host, args.port);
-    server.await?;
-
-    Ok(())
+    server.await.context("server failed")
 }
