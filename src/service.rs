@@ -181,7 +181,6 @@ impl S3Service {
             .find(|param| *param == "download=true");
 
         if is_html_req && download_param.is_none() {
-            dbg!(is_html_req);
             return Ok(serve_file(req).await?);
         }
         let ret = match self.handle(req).await {

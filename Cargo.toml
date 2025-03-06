@@ -13,7 +13,6 @@ categories = ["web-programming", "web-programming::http-server"]
 [features]
 default = []
 binary = [
-    "anyhow", 
     "dotenv", 
     "structopt", 
     "structopt-flags",
@@ -25,7 +24,7 @@ name = "s3-server"
 required-features = ["binary"]
 
 [dependencies]
-anyhow = { version = "1.0.57", optional = true }
+anyhow = { version = "1.0.57", features = ["backtrace"]}
 async-trait = "0.1.53"
 backtrace = "0.3.65"
 base64-simd = "0.8.0"

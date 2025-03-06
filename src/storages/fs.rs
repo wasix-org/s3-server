@@ -25,7 +25,6 @@ use crate::utils::{crypto, time, Apply};
 
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
-use std::env;
 use std::io::{self, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -33,8 +32,9 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use hyper::body::Bytes;
 use md5::{Digest, Md5};
 use path_absolutize::Absolutize;
+use rusoto_s3::CommonPrefix;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufWriter};
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 use uuid::Uuid;
 
 use tokio::fs;
@@ -51,15 +51,8 @@ impl FileSystem {
     /// Constructs a file system storage located at `root`
     /// # Errors
     /// Returns an `Err` if current working directory is invalid or `root` doesn't exist
-    pub fn new(root: impl AsRef<Path>) -> io::Result<Self> {
-        let mut root = env::current_dir()
-            .unwrap_or_else(|_| PathBuf::new())
-            .join(root);
-        root = match root.canonicalize() {
-            Ok(r) => r,
-            Err(_) => root,
-        };
-        trace!("File system root = {:?}", root);
+    pub fn new(root: impl AsRef<Path>) -> Result<Self, io::Error> {
+        let root = root.as_ref().canonicalize()?;
         Ok(Self { root })
     }
 
@@ -515,8 +508,11 @@ impl S3Storage for FileSystem {
         let path = trace_try!(self.get_bucket_path(&input.bucket));
 
         let mut objects = Vec::new();
+        let mut common_prefixes = Vec::new();
         let mut dir_queue = VecDeque::new();
         dir_queue.push_back(path.clone());
+
+        let delimiter_is_dir = input.delimiter.as_deref() == Some("/");
 
         while let Some(dir) = dir_queue.pop_front() {
             let mut entries = trace_try!(fs::read_dir(dir).await);
@@ -525,6 +521,19 @@ impl S3Storage for FileSystem {
                 if let Some(entry) = entry {
                     let file_type = trace_try!(entry.file_type().await);
                     if file_type.is_dir() {
+                        if delimiter_is_dir {
+                            if let Some(name) = entry.file_name().to_str() {
+                                let mut prefix = name.to_owned();
+                                prefix.push('/');
+
+                                if input.prefix.as_deref() != Some(prefix.as_str()) {
+                                    common_prefixes.push(CommonPrefix {
+                                        prefix: Some(prefix),
+                                    });
+                                    continue;
+                                }
+                            }
+                        }
                         dir_queue.push_back(entry.path());
                     } else {
                         let file_path = entry.path();
@@ -539,9 +548,15 @@ impl S3Storage for FileSystem {
                         let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
                         let size = metadata.len();
 
+                        let key = if delimiter_is_dir {
+                            key.to_string_lossy().into_owned()
+                        } else {
+                            key.file_name().unwrap().to_string_lossy().into_owned()
+                        };
+
                         objects.push(Object {
                             e_tag: None,
-                            key: Some(key.to_string_lossy().into()),
+                            key: Some(key),
                             last_modified: Some(last_modified),
                             owner: None,
                             size: Some(trace_try!(size.try_into())),
@@ -553,7 +568,6 @@ impl S3Storage for FileSystem {
                 }
             }
         }
-
         objects.sort_by(|lhs, rhs| {
             let lhs_key = lhs.key.as_deref().unwrap_or("");
             let rhs_key = rhs.key.as_deref().unwrap_or("");
@@ -566,7 +580,11 @@ impl S3Storage for FileSystem {
             delimiter: input.delimiter,
             encoding_type: input.encoding_type,
             name: Some(input.bucket),
-            common_prefixes: None,
+            common_prefixes: if common_prefixes.is_empty() {
+                None
+            } else {
+                Some(common_prefixes)
+            },
             is_truncated: None,
             marker: None,
             max_keys: None,
