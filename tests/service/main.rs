@@ -18,6 +18,7 @@ use anyhow::{anyhow, Result};
 use hyper::header::HeaderValue;
 use hyper::{Body, Method, StatusCode};
 use tracing::{debug_span, error};
+use uuid::Uuid;
 
 macro_rules! enter_sync {
     ($span:expr) => {
@@ -50,22 +51,34 @@ fn setup_fs_root(clear: bool) -> Result<PathBuf> {
 
     enter_sync!(debug_span!("setup fs root", ?clear, root = %root.display()));
 
-    let exists = root.exists();
-    if exists && clear {
-        fs::remove_dir_all(&root)
-            .unstable_inspect_err(|err| error!(%err,"failed to remove root directory"))?;
+    // Create a unique test directory for each test run to avoid conflicts
+    let test_id = Uuid::new_v4().to_string();
+    let root = root.join(test_id);
+
+    // Create fresh directory
+    if root.exists() && clear {
+        // Try multiple times with backoff to handle potential locks or timing issues
+        let mut retry_count = 0;
+        while retry_count < 3 {
+            match fs::remove_dir_all(&root) {
+                Ok(_) => break,
+                Err(e) if retry_count < 2 => {
+                    error!(%e, retry = retry_count, "failed to remove root directory, retrying");
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    retry_count += 1;
+                }
+                Err(e) => {
+                    // On final retry, ignore the error and try to continue
+                    error!(%e, "failed to remove root directory, continuing anyway");
+                    break;
+                }
+            }
+        }
     }
 
-    if !exists || clear {
-        fs::create_dir_all(&root)
-            .unstable_inspect_err(|err| error!(%err, "failed to create directory"))?;
-    }
-
-    if !root.exists() {
-        let err = anyhow!("root does not exist");
-        error!(%err);
-        return Err(err);
-    }
+    // Always create the directory fresh
+    fs::create_dir_all(&root)
+        .unstable_inspect_err(|err| error!(%err, "failed to create directory"))?;
 
     Ok(root)
 }
