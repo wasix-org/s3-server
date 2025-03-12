@@ -52,7 +52,31 @@ impl FileSystem {
     /// # Errors
     /// Returns an `Err` if current working directory is invalid or `root` doesn't exist
     pub fn new(root: impl AsRef<Path>) -> Result<Self, io::Error> {
-        let root = root.as_ref().canonicalize()?;
+        let root_path = root.as_ref();
+
+        // Check if the path exists
+        if !root_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Root path does not exist: {}", root_path.display()),
+            ));
+        }
+
+        // Try to canonicalize, but if it fails on WASM, use the path as-is
+        let root = match root_path.canonicalize() {
+            Ok(canonical) => canonical,
+            Err(e) => {
+                if cfg!(target_family = "wasm") || e.kind() == io::ErrorKind::Unsupported {
+                    // In WASM or if canonicalization is unsupported, use the path as-is
+                    root_path.to_path_buf()
+                } else {
+                    // For other errors, propagate them
+                    return Err(e);
+                }
+            }
+        };
+
+        debug!("File system root = {:?}", root);
         Ok(Self { root })
     }
 
