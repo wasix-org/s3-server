@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-wasix:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     name: "Build WASIX"
     steps:
     - uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
         path: target/wasm32-wasmer-wasi/release/s3-server.wasm
 
   test-wasix:
-    runs-on: ubuntu-22.04    
+    runs-on: ubuntu-latest    
     needs: build-wasix
     name: "Test WASIX"
     steps:
@@ -67,7 +67,7 @@ jobs:
         RUN_RCLONE=1 ./scripts/wasix-test.sh
 
   publish:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     if: ${{ github.ref == 'refs/heads/master' }}
     needs: [build-wasix, test-wasix]
     name: "Publish"
