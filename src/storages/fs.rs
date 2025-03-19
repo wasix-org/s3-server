@@ -47,6 +47,32 @@ pub struct FileSystem {
     root: PathBuf,
 }
 
+/// Helper function to recursively collect all files and directories
+async fn collect_files_recursive(dir: &Path, files: &mut Vec<(PathBuf, bool)>) -> io::Result<()> {
+    let mut stack = vec![dir.to_owned()];
+
+    while let Some(current_dir) = stack.pop() {
+        let mut entries = fs::read_dir(&current_dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            let file_type = entry.file_type().await?;
+
+            if file_type.is_dir() {
+                // Add the directory itself
+                files.push((path.clone(), true));
+                // Add to stack for processing
+                stack.push(path);
+            } else {
+                // Add regular file
+                files.push((path, false));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 impl FileSystem {
     /// Constructs a file system storage located at `root`
     /// # Errors
@@ -533,54 +559,102 @@ impl S3Storage for FileSystem {
 
         let mut objects = Vec::new();
         let mut common_prefixes = Vec::new();
-        let mut dir_queue = VecDeque::new();
-        dir_queue.push_back(path.clone());
-
         let delimiter_is_dir = input.delimiter.as_deref() == Some("/");
+        let request_prefix = input.prefix.as_deref().unwrap_or("");
 
-        while let Some(dir) = dir_queue.pop_front() {
-            let mut entries = trace_try!(fs::read_dir(dir).await);
-            loop {
-                let entry = trace_try!(entries.next_entry().await);
-                if let Some(entry) = entry {
-                    let file_type = trace_try!(entry.file_type().await);
-                    if file_type.is_dir() {
-                        if delimiter_is_dir {
-                            if let Some(name) = entry.file_name().to_str() {
-                                let mut prefix = name.to_owned();
-                                prefix.push('/');
+        // This will be true if we're looking at contents of a specific directory
+        let is_dir_listing = request_prefix.ends_with('/');
 
-                                if input.prefix.as_deref() != Some(prefix.as_str()) {
-                                    common_prefixes.push(CommonPrefix {
-                                        prefix: Some(prefix),
-                                    });
-                                    continue;
-                                }
-                            }
-                        }
-                        dir_queue.push_back(entry.path());
+        // First, collect all files recursively
+        let mut all_files: Vec<(PathBuf, bool)> = Vec::new(); // (path, is_dir)
+        collect_files_recursive(&path, &mut all_files)
+            .await
+            .map_err(|e| {
+                S3StorageError::Operation(ListObjectsError::NoSuchBucket(e.to_string()))
+            })?;
+
+        // For each file, see if it should be included in the listing
+        for (file_path, is_dir) in all_files {
+            let relative_path = trace_try!(file_path.strip_prefix(&path));
+            let key_str = relative_path.to_string_lossy();
+
+            // Skip if it doesn't match the prefix
+            if !key_str.starts_with(request_prefix) {
+                continue;
+            }
+
+            if is_dir {
+                let dir_key = format!("{}/", key_str);
+
+                if delimiter_is_dir {
+                    // Special handling for delimiter with directories
+
+                    // Check if this is the directory we're listing
+                    let is_requested_dir = is_dir_listing && dir_key == request_prefix;
+
+                    // Check if this is a direct child of the directory we're listing
+                    let is_direct_child = if is_dir_listing {
+                        let prefix_parts =
+                            request_prefix.split('/').filter(|p| !p.is_empty()).count();
+                        let dir_parts = dir_key.split('/').filter(|p| !p.is_empty()).count();
+                        dir_key.starts_with(request_prefix) && dir_parts == prefix_parts + 1
                     } else {
-                        let file_path = entry.path();
-                        let key = trace_try!(file_path.strip_prefix(&path));
-                        if let Some(ref prefix) = input.prefix {
-                            if !key.to_string_lossy().as_ref().starts_with(prefix) {
-                                continue;
+                        let parts = dir_key.split('/').filter(|p| !p.is_empty()).count();
+                        parts == 1
+                    };
+
+                    if !is_requested_dir && is_direct_child {
+                        // Add direct child directories as common prefixes
+                        common_prefixes.push(CommonPrefix {
+                            prefix: Some(dir_key),
+                        });
+                    }
+                }
+            } else {
+                let metadata = trace_try!(file_path.metadata());
+                let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
+                let size = metadata.len();
+
+                if delimiter_is_dir {
+                    // With delimiter, we need to handle file paths carefully
+
+                    // Check if file is in a subdirectory
+                    if key_str.contains('/') {
+                        if is_dir_listing {
+                            // In a directory listing, include only direct children
+                            let remaining_path = key_str
+                                .strip_prefix(request_prefix)
+                                .unwrap_or(key_str.as_ref());
+                            if !remaining_path.contains('/') {
+                                // Direct child of the requested directory
+                                objects.push(Object {
+                                    e_tag: None,
+                                    key: Some(key_str.into_owned()),
+                                    last_modified: Some(last_modified),
+                                    owner: None,
+                                    size: Some(trace_try!(size.try_into())),
+                                    storage_class: None,
+                                });
+                            }
+                        } else {
+                            // Root listing, group files by their top-level directory
+                            let top_dir = key_str.split('/').next().unwrap_or("");
+                            let prefix = format!("{}/", top_dir);
+
+                            if !common_prefixes
+                                .iter()
+                                .any(|cp| cp.prefix.as_deref() == Some(&prefix))
+                            {
+                                common_prefixes.push(CommonPrefix {
+                                    prefix: Some(prefix),
+                                });
                             }
                         }
-
-                        let metadata = trace_try!(entry.metadata().await);
-                        let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
-                        let size = metadata.len();
-
-                        let key = if delimiter_is_dir {
-                            key.to_string_lossy().into_owned()
-                        } else {
-                            key.file_name().unwrap().to_string_lossy().into_owned()
-                        };
-
+                    } else {
+                        // File in the root level
                         objects.push(Object {
                             e_tag: None,
-                            key: Some(key),
+                            key: Some(key_str.into_owned()),
                             last_modified: Some(last_modified),
                             owner: None,
                             size: Some(trace_try!(size.try_into())),
@@ -588,10 +662,19 @@ impl S3Storage for FileSystem {
                         });
                     }
                 } else {
-                    break;
+                    // Without delimiter, include all files
+                    objects.push(Object {
+                        e_tag: None,
+                        key: Some(key_str.into_owned()),
+                        last_modified: Some(last_modified),
+                        owner: None,
+                        size: Some(trace_try!(size.try_into())),
+                        storage_class: None,
+                    });
                 }
             }
         }
+
         objects.sort_by(|lhs, rhs| {
             let lhs_key = lhs.key.as_deref().unwrap_or("");
             let rhs_key = rhs.key.as_deref().unwrap_or("");
@@ -627,33 +710,103 @@ impl S3Storage for FileSystem {
         let path = trace_try!(self.get_bucket_path(&input.bucket));
 
         let mut objects = Vec::new();
-        let mut dir_queue = VecDeque::new();
-        dir_queue.push_back(path.clone());
+        let mut common_prefixes = Vec::new();
+        let delimiter_is_dir = input.delimiter.as_deref() == Some("/");
+        let request_prefix = input.prefix.as_deref().unwrap_or("");
 
-        while let Some(dir) = dir_queue.pop_front() {
-            let mut entries = trace_try!(fs::read_dir(dir).await);
-            loop {
-                let entry = trace_try!(entries.next_entry().await);
-                if let Some(entry) = entry {
-                    let file_type = trace_try!(entry.file_type().await);
-                    if file_type.is_dir() {
-                        dir_queue.push_back(entry.path());
+        // This will be true if we're looking at contents of a specific directory
+        let is_dir_listing = request_prefix.ends_with('/');
+
+        // First, collect all files recursively
+        let mut all_files: Vec<(PathBuf, bool)> = Vec::new(); // (path, is_dir)
+        collect_files_recursive(&path, &mut all_files)
+            .await
+            .map_err(|e| {
+                S3StorageError::Operation(ListObjectsV2Error::NoSuchBucket(e.to_string()))
+            })?;
+
+        // For each file, see if it should be included in the listing
+        for (file_path, is_dir) in all_files {
+            let relative_path = trace_try!(file_path.strip_prefix(&path));
+            let key_str = relative_path.to_string_lossy();
+
+            // Skip if it doesn't match the prefix
+            if !key_str.starts_with(request_prefix) {
+                continue;
+            }
+
+            if is_dir {
+                let dir_key = format!("{}/", key_str);
+
+                if delimiter_is_dir {
+                    // Special handling for delimiter with directories
+
+                    // Check if this is the directory we're listing
+                    let is_requested_dir = is_dir_listing && dir_key == request_prefix;
+
+                    // Check if this is a direct child of the directory we're listing
+                    let is_direct_child = if is_dir_listing {
+                        let prefix_parts =
+                            request_prefix.split('/').filter(|p| !p.is_empty()).count();
+                        let dir_parts = dir_key.split('/').filter(|p| !p.is_empty()).count();
+                        dir_key.starts_with(request_prefix) && dir_parts == prefix_parts + 1
                     } else {
-                        let file_path = entry.path();
-                        let key = trace_try!(file_path.strip_prefix(&path));
-                        if let Some(ref prefix) = input.prefix {
-                            if !key.to_string_lossy().as_ref().starts_with(prefix) {
-                                continue;
+                        let parts = dir_key.split('/').filter(|p| !p.is_empty()).count();
+                        parts == 1
+                    };
+
+                    if !is_requested_dir && is_direct_child {
+                        // Add direct child directories as common prefixes
+                        common_prefixes.push(CommonPrefix {
+                            prefix: Some(dir_key),
+                        });
+                    }
+                }
+            } else {
+                let metadata = trace_try!(file_path.metadata());
+                let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
+                let size = metadata.len();
+
+                if delimiter_is_dir {
+                    // With delimiter, we need to handle file paths carefully
+
+                    // Check if file is in a subdirectory
+                    if key_str.contains('/') {
+                        if is_dir_listing {
+                            // In a directory listing, include only direct children
+                            let remaining_path = key_str
+                                .strip_prefix(request_prefix)
+                                .unwrap_or(key_str.as_ref());
+                            if !remaining_path.contains('/') {
+                                // Direct child of the requested directory
+                                objects.push(Object {
+                                    e_tag: None,
+                                    key: Some(key_str.into_owned()),
+                                    last_modified: Some(last_modified),
+                                    owner: None,
+                                    size: Some(trace_try!(size.try_into())),
+                                    storage_class: None,
+                                });
+                            }
+                        } else {
+                            // Root listing, group files by their top-level directory
+                            let top_dir = key_str.split('/').next().unwrap_or("");
+                            let prefix = format!("{}/", top_dir);
+
+                            if !common_prefixes
+                                .iter()
+                                .any(|cp| cp.prefix.as_deref() == Some(&prefix))
+                            {
+                                common_prefixes.push(CommonPrefix {
+                                    prefix: Some(prefix),
+                                });
                             }
                         }
-
-                        let metadata = trace_try!(entry.metadata().await);
-                        let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
-                        let size = metadata.len();
-
+                    } else {
+                        // File in the root level
                         objects.push(Object {
                             e_tag: None,
-                            key: Some(key.to_string_lossy().into()),
+                            key: Some(key_str.into_owned()),
                             last_modified: Some(last_modified),
                             owner: None,
                             size: Some(trace_try!(size.try_into())),
@@ -661,7 +814,15 @@ impl S3Storage for FileSystem {
                         });
                     }
                 } else {
-                    break;
+                    // Without delimiter, include all files
+                    objects.push(Object {
+                        e_tag: None,
+                        key: Some(key_str.into_owned()),
+                        last_modified: Some(last_modified),
+                        owner: None,
+                        size: Some(trace_try!(size.try_into())),
+                        storage_class: None,
+                    });
                 }
             }
         }
@@ -679,7 +840,11 @@ impl S3Storage for FileSystem {
             delimiter: input.delimiter,
             encoding_type: input.encoding_type,
             name: Some(input.bucket),
-            common_prefixes: None,
+            common_prefixes: if common_prefixes.is_empty() {
+                None
+            } else {
+                Some(common_prefixes)
+            },
             is_truncated: None,
             max_keys: None,
             prefix: None,
