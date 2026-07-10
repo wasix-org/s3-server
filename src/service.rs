@@ -489,9 +489,13 @@ async fn check_presigned_url(
             .headers
             .map_signed_headers(&presigned_url.signed_headers);
 
+        // Canonicalize the decoded path, the way routing does (decode_uri_path).
+        // The client signs uri_encode(key) exactly once, so feeding the raw wire
+        // path would encode a second time ('+' -> %252B) and never match.
+        let decoded_path = decode_uri_path(ctx.req)?;
         let canonical_request = signature_v4::create_presigned_canonical_request(
             ctx.req.method(),
-            ctx.req.uri().path(),
+            decoded_path.as_ref(),
             qs.as_ref(),
             &headers,
         );
@@ -544,7 +548,11 @@ async fn check_header_auth(
 
     let signature = {
         let method = ctx.req.method();
-        let uri_path = ctx.req.uri().path();
+        // Canonicalize the decoded path, the way routing does (decode_uri_path).
+        // The client signs uri_encode(key) exactly once, so feeding the raw wire
+        // path would encode a second time ('+' -> %252B) and never match.
+        let decoded_path = decode_uri_path(ctx.req)?;
+        let uri_path: &str = decoded_path.as_ref();
         let query_strings: &[(String, String)] =
             ctx.query_strings.as_ref().map_or(&[], AsRef::as_ref);
 

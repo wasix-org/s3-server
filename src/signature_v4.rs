@@ -521,6 +521,26 @@ mod tests {
     }
 
     #[test]
+    fn canonical_uri_encodes_plus_in_key() {
+        // A decoded key with '+' must be percent-encoded exactly once into the canonical URI.
+        // The auth path feeds in the decoded request path, so '+' -> %2B, matching the client;
+        // feeding the raw wire path would encode a second time ('+' -> %252B).
+        let headers = OrderedHeaders::from_slice_unchecked(&[("host", "b.s3.amazonaws.com")]);
+        let qs: &[(String, String)] = &[];
+        let canonical_request = create_canonical_request(
+            &Method::PUT,
+            "/b/pkg-1.0+post.1.whl",
+            qs,
+            &headers,
+            Payload::Unsigned,
+        );
+        assert_eq!(
+            canonical_request.lines().nth(1).unwrap(),
+            "/b/pkg-1.0%2Bwasix.1.whl"
+        );
+    }
+
+    #[test]
     fn example_put_object_single_chunk() {
         // let access_key_id = "AKIAIOSFODNN7EXAMPLE";
         let secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
