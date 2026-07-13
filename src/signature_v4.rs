@@ -536,7 +536,7 @@ mod tests {
         );
         assert_eq!(
             canonical_request.lines().nth(1).unwrap(),
-            "/b/pkg-1.0%2Bwasix.1.whl"
+            "/b/pkg-1.0%2Bpost.1.whl"
         );
     }
 
