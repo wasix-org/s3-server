@@ -854,6 +854,12 @@ impl S3Storage for FileSystem {
         };
 
         let object_path = trace_try!(self.get_object_path(&bucket, &key));
+        // Create the key's parent dirs first, as put_object does; otherwise a
+        // prefixed key (e.g. simple/pkg/x.whl) fails File::create with
+        // NotFound and Complete returns 500.
+        if let Some(dir_path) = object_path.parent() {
+            trace_try!(fs::create_dir_all(&dir_path).await);
+        }
         let file = trace_try!(File::create(&object_path).await);
         let mut writer = BufWriter::new(file);
 
