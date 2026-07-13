@@ -1093,7 +1093,7 @@ checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
 [[package]]
 name = "rusoto_core"
 version = "0.48.0"
-source = "git+https://github.com/wasix-org/rusoto.git?branch=v0.48.0#7a1227a0fbd87975a1d6c961f1532c3a27f31230"
+source = "git+https://github.com/wasix-org/rusoto.git?branch=v0.48.0#5899b46ce5acfdf997e6a3edd72fb465403d9e58"
 dependencies = [
  "async-trait",
  "base64",
@@ -1116,7 +1116,7 @@ dependencies = [
 [[package]]
 name = "rusoto_credential"
 version = "0.48.0"
-source = "git+https://github.com/wasix-org/rusoto.git?branch=v0.48.0#7a1227a0fbd87975a1d6c961f1532c3a27f31230"
+source = "git+https://github.com/wasix-org/rusoto.git?branch=v0.48.0#5899b46ce5acfdf997e6a3edd72fb465403d9e58"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1133,7 +1133,7 @@ dependencies = [
 [[package]]
 name = "rusoto_s3"
 version = "0.48.0"
-source = "git+https://github.com/wasix-org/rusoto.git?branch=v0.48.0#7a1227a0fbd87975a1d6c961f1532c3a27f31230"
+source = "git+https://github.com/wasix-org/rusoto.git?branch=v0.48.0#5899b46ce5acfdf997e6a3edd72fb465403d9e58"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1145,7 +1145,7 @@ dependencies = [
 [[package]]
 name = "rusoto_signature"
 version = "0.48.0"
-source = "git+https://github.com/wasix-org/rusoto.git?branch=v0.48.0#7a1227a0fbd87975a1d6c961f1532c3a27f31230"
+source = "git+https://github.com/wasix-org/rusoto.git?branch=v0.48.0#5899b46ce5acfdf997e6a3edd72fb465403d9e58"
 dependencies = [
  "base64",
  "bytes",
