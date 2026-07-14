@@ -34,7 +34,7 @@ use md5::{Digest, Md5};
 use path_absolutize::Absolutize;
 use rusoto_s3::CommonPrefix;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufWriter};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 use tokio::fs;
@@ -758,7 +758,13 @@ impl S3Storage for FileSystem {
         );
 
         if let Some(ref metadata) = metadata {
-            trace_try!(self.save_metadata(&bucket, &key, metadata).await);
+            // The metadata sidecar lives at the fs-root, which may be read-only
+            // (e.g. an Edge volume is mounted at the bucket, not the root). The
+            // object itself is already written, so a failed sidecar write should
+            // not fail the whole PUT
+            if let Err(err) = self.save_metadata(&bucket, &key, metadata).await {
+                warn!(%bucket, %key, %err, "could not persist object metadata; object stored without it");
+            }
         }
 
         let output = PutObjectOutput {
