@@ -15,7 +15,7 @@ use std::io;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
-use hyper::header::HeaderValue;
+use hyper::header::{HeaderName, HeaderValue};
 use hyper::{Body, Method, StatusCode};
 use tracing::{debug_span, error};
 use uuid::Uuid;
@@ -322,6 +322,91 @@ mod success {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn put_object_metadata_in_reserved_dir() -> Result<()> {
+        let (root, service) = setup_service().unwrap();
+        let bucket = "asd";
+        let key = "dir/obj";
+        let content = "hi";
+        fs::create_dir(generate_path(&root, S3Path::Bucket { bucket })).unwrap();
+
+        let mut req = Request::new(Body::from(content));
+        *req.method_mut() = Method::PUT;
+        *req.uri_mut() = format!("http://localhost/{}/{}", bucket, key)
+            .parse()
+            .unwrap();
+        req.headers_mut().insert(
+            X_AMZ_CONTENT_SHA256,
+            HeaderValue::from_static("UNSIGNED-PAYLOAD"),
+        );
+        req.headers_mut().insert(
+            HeaderName::from_static("x-amz-meta-foo"),
+            HeaderValue::from_static("bar"),
+        );
+
+        assert_eq!(
+            service.hyper_call(req).await.unwrap().status(),
+            StatusCode::OK
+        );
+
+        // object stored at its real path
+        let obj = generate_path(&root, S3Path::Object { bucket, key });
+        assert_eq!(fs::read_to_string(obj).unwrap(), content);
+
+        // metadata sidecar lives in the bucket's reserved dir, nothing at the fs-root
+        let meta_dir = root.join(bucket).join(".wasmer-s3").join("meta");
+        assert_eq!(fs::read_dir(&meta_dir).unwrap().count(), 1);
+        let root_has_sidecar = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".metadata.json"));
+        assert!(!root_has_sidecar);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_omits_reserved_dir() -> Result<()> {
+        let (root, service) = setup_service().unwrap();
+        let bucket = "asd";
+        fs::create_dir(generate_path(&root, S3Path::Bucket { bucket })).unwrap();
+
+        let mut put = Request::new(Body::from("x"));
+        *put.method_mut() = Method::PUT;
+        *put.uri_mut() = format!("http://localhost/{}/obj", bucket).parse().unwrap();
+        put.headers_mut().insert(
+            X_AMZ_CONTENT_SHA256,
+            HeaderValue::from_static("UNSIGNED-PAYLOAD"),
+        );
+        put.headers_mut().insert(
+            HeaderName::from_static("x-amz-meta-foo"),
+            HeaderValue::from_static("bar"),
+        );
+        assert_eq!(
+            service.hyper_call(put).await.unwrap().status(),
+            StatusCode::OK
+        );
+        assert!(root.join(bucket).join(".wasmer-s3").exists());
+
+        let mut req = Request::new(Body::empty());
+        *req.method_mut() = Method::GET;
+        *req.uri_mut() = format!("http://localhost/{}?list-type=2", bucket)
+            .parse()
+            .unwrap();
+        req.headers_mut().insert(
+            X_AMZ_CONTENT_SHA256,
+            HeaderValue::from_static("UNSIGNED-PAYLOAD"),
+        );
+
+        let mut res = service.hyper_call(req).await.unwrap();
+        let body = recv_body_string(&mut res).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(body.contains("obj"));
+        assert!(!body.contains(".wasmer-s3"));
+
+        Ok(())
+    }
 }
 
 mod error {
@@ -434,5 +519,53 @@ mod error {
         );
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn put_reserved_key() -> Result<()> {
+        let (root, service) = setup_service().unwrap();
+        let bucket = "asd";
+        fs::create_dir(generate_path(&root, S3Path::Bucket { bucket })).unwrap();
+
+        let mut req = Request::new(Body::from("x"));
+        *req.method_mut() = Method::PUT;
+        *req.uri_mut() = format!("http://localhost/{}/.wasmer-s3/evil", bucket)
+            .parse()
+            .unwrap();
+        req.headers_mut().insert(
+            X_AMZ_CONTENT_SHA256,
+            HeaderValue::from_static("UNSIGNED-PAYLOAD"),
+        );
+
+        let mut res = service.hyper_call(req).await.unwrap();
+        let body = recv_body_string(&mut res).await.unwrap();
+
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert!(body.contains("AccessDenied"));
+        assert!(body.contains("reserved for internal use"));
+        assert!(!root.join(bucket).join(".wasmer-s3").join("evil").exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_reserved_key() {
+        let (_, service) = setup_service().unwrap();
+
+        let mut req = Request::new(Body::empty());
+        *req.method_mut() = Method::GET;
+        *req.uri_mut() = "http://localhost/asd/.wasmer-s3/meta/x.json"
+            .parse()
+            .unwrap();
+        req.headers_mut().insert(
+            X_AMZ_CONTENT_SHA256,
+            HeaderValue::from_static("UNSIGNED-PAYLOAD"),
+        );
+
+        let mut res = service.hyper_call(req).await.unwrap();
+        let body = recv_body_string(&mut res).await.unwrap();
+
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        assert!(body.contains("NoSuchKey"));
     }
 }
