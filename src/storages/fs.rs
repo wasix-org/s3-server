@@ -329,7 +329,9 @@ impl S3Storage for FileSystem {
             if is_empty {
                 trace_try!(fs::remove_dir(&path).await);
             }
-        } else {
+        } else if path.exists() {
+            // DeleteObject is idempotent in S3: a key that is already gone is a
+            // success, not a 500 (matches the delete_objects guard below).
             trace_try!(fs::remove_file(path).await);
         }
         let output = DeleteObjectOutput::default(); // TODO: handle other fields
@@ -412,6 +414,13 @@ impl S3Storage for FileSystem {
         };
 
         let file_metadata = trace_try!(file.metadata().await);
+        // File::open succeeds on a directory (e.g. a key that is really a prefix
+        // like "manifests"); report it as absent instead of 500ing while trying
+        // to stream a directory as an object body.
+        if file_metadata.is_dir() {
+            let err = code_error!(NoSuchKey, "The specified key does not exist.");
+            return Err(err.into());
+        }
         let last_modified = time::to_rfc3339(trace_try!(file_metadata.modified()));
 
         let content_length = {
@@ -516,6 +525,11 @@ impl S3Storage for FileSystem {
         }
 
         let file_metadata = trace_try!(fs::metadata(path).await);
+        // a prefix (directory) is not an object; report absent, not a phantom hit
+        if file_metadata.is_dir() {
+            let err = code_error!(NoSuchKey, "The specified key does not exist.");
+            return Err(err.into());
+        }
         let last_modified = time::to_rfc3339(trace_try!(file_metadata.modified()));
         let size = file_metadata.len();
 
@@ -619,11 +633,11 @@ impl S3Storage for FileSystem {
                         let last_modified = time::to_rfc3339(trace_try!(metadata.modified()));
                         let size = metadata.len();
 
-                        let key = if delimiter_is_dir {
-                            key.to_string_lossy().into_owned()
-                        } else {
-                            key.file_name().unwrap().to_string_lossy().into_owned()
-                        };
+                        // an S3 key is the full path from the bucket root
+                        // ("simple/x/y.whl"), never the basename; returning the
+                        // basename made recursive clients (rclone copy/delete)
+                        // act on the wrong key. list_objects_v2 already does this.
+                        let key = key.to_string_lossy().into_owned();
 
                         objects.push(Object {
                             e_tag: None,
