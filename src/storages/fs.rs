@@ -47,6 +47,16 @@ pub struct FileSystem {
     root: PathBuf,
 }
 
+/// Per-bucket dir for the server's own bookkeeping (object metadata, multipart
+/// parts). Kept on the writable volume, not the maybe-read-only fs-root, and
+/// reserved: user keys under it are refused and it is hidden from listings.
+const RESERVED_DIR: &str = ".wasmer-s3";
+
+/// Does a key fall under the reserved dir at the bucket root?
+fn key_under_reserved(key: &str) -> bool {
+    key.trim_start_matches('/').split('/').next() == Some(RESERVED_DIR)
+}
+
 impl FileSystem {
     /// Constructs a file system storage located at `root`
     /// # Errors
@@ -82,6 +92,12 @@ impl FileSystem {
 
     /// resolve object path under the virtual root
     fn get_object_path(&self, bucket: &str, key: &str) -> io::Result<PathBuf> {
+        if key_under_reserved(key) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("keys under {RESERVED_DIR}/ are reserved"),
+            ));
+        }
         let dir = Path::new(&bucket);
         let file_path = Path::new(&key);
         let ans = dir.join(file_path).absolutize_virtually(&self.root)?.into();
@@ -95,18 +111,24 @@ impl FileSystem {
         Ok(ans)
     }
 
-    /// resolve metadata path under the virtual root (custom format)
-    fn get_metadata_path(&self, bucket: &str, key: &str) -> io::Result<PathBuf> {
-        let encode = |s: &str| base64_simd::URL_SAFE_NO_PAD.encode_to_string(s);
+    /// Resolve `<bucket>/RESERVED_DIR/<sub>/<name>` on the writable volume.
+    fn reserved_path(&self, bucket: &str, sub: &str, name: &str) -> io::Result<PathBuf> {
+        let rel = Path::new(bucket).join(RESERVED_DIR).join(sub).join(name);
+        Ok(rel.absolutize_virtually(&self.root)?.into())
+    }
 
-        let file_path_str = format!(
-            ".bucket-{}.object-{}.metadata.json",
-            encode(bucket),
-            encode(key),
+    /// Object metadata sidecar path (in the bucket's reserved dir).
+    fn get_metadata_path(&self, bucket: &str, key: &str) -> io::Result<PathBuf> {
+        let name = format!(
+            "{}.json",
+            base64_simd::URL_SAFE_NO_PAD.encode_to_string(key)
         );
-        let file_path = Path::new(&file_path_str);
-        let ans = file_path.absolutize_virtually(&self.root)?.into();
-        Ok(ans)
+        self.reserved_path(bucket, "meta", &name)
+    }
+
+    /// Multipart part path (in the bucket's reserved dir).
+    fn get_part_path(&self, bucket: &str, upload_id: &str, part: i64) -> io::Result<PathBuf> {
+        self.reserved_path(bucket, "mpu", &format!("{upload_id}.part-{part}"))
     }
 
     /// load metadata from fs
@@ -134,6 +156,9 @@ impl FileSystem {
         metadata: &HashMap<String, String>,
     ) -> io::Result<()> {
         let path = self.get_metadata_path(bucket, key)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
         let content = serde_json::to_vec(metadata)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         fs::write(&path, &content).await
@@ -258,6 +283,9 @@ impl S3Storage for FileSystem {
         let src_metadata_path = trace_try!(self.get_metadata_path(bucket, key));
         if src_metadata_path.exists() {
             let dst_metadata_path = trace_try!(self.get_metadata_path(&input.bucket, &input.key));
+            if let Some(parent) = dst_metadata_path.parent() {
+                trace_try!(fs::create_dir_all(parent).await);
+            }
             let _ = trace_try!(fs::copy(src_metadata_path, dst_metadata_path).await);
         }
 
@@ -290,6 +318,10 @@ impl S3Storage for FileSystem {
         &self,
         input: DeleteObjectRequest,
     ) -> S3StorageResult<DeleteObjectOutput, DeleteObjectError> {
+        if key_under_reserved(&input.key) {
+            // reserved keys read as absent; delete is idempotent
+            return Ok(DeleteObjectOutput::default());
+        }
         let path = trace_try!(self.get_object_path(&input.bucket, &input.key));
         if input.key.ends_with('/') {
             let mut dir = trace_try!(fs::read_dir(&path).await);
@@ -311,6 +343,9 @@ impl S3Storage for FileSystem {
     ) -> S3StorageResult<DeleteObjectsOutput, DeleteObjectsError> {
         let mut objects: Vec<(PathBuf, String)> = Vec::new();
         for object in input.delete.objects {
+            if key_under_reserved(&object.key) {
+                continue;
+            }
             let path = trace_try!(self.get_object_path(&input.bucket, &object.key));
             if path.exists() {
                 objects.push((path, object.key));
@@ -356,6 +391,10 @@ impl S3Storage for FileSystem {
         &self,
         input: GetObjectRequest,
     ) -> S3StorageResult<GetObjectOutput, GetObjectError> {
+        if key_under_reserved(&input.key) {
+            let err = code_error!(NoSuchKey, "The specified key does not exist.");
+            return Err(err.into());
+        }
         let object_path = trace_try!(self.get_object_path(&input.bucket, &input.key));
 
         let parse_range = |s: &str| {
@@ -465,6 +504,10 @@ impl S3Storage for FileSystem {
         &self,
         input: HeadObjectRequest,
     ) -> S3StorageResult<HeadObjectOutput, HeadObjectError> {
+        if key_under_reserved(&input.key) {
+            let err = code_error!(NoSuchKey, "The specified key does not exist.");
+            return Err(err.into());
+        }
         let path = trace_try!(self.get_object_path(&input.bucket, &input.key));
 
         if !path.exists() {
@@ -539,10 +582,14 @@ impl S3Storage for FileSystem {
         let delimiter_is_dir = input.delimiter.as_deref() == Some("/");
 
         while let Some(dir) = dir_queue.pop_front() {
-            let mut entries = trace_try!(fs::read_dir(dir).await);
+            let mut entries = trace_try!(fs::read_dir(&dir).await);
             loop {
                 let entry = trace_try!(entries.next_entry().await);
                 if let Some(entry) = entry {
+                    // hide the reserved bookkeeping dir at the bucket root
+                    if dir == path && entry.file_name().to_str() == Some(RESERVED_DIR) {
+                        continue;
+                    }
                     let file_type = trace_try!(entry.file_type().await);
                     if file_type.is_dir() {
                         if delimiter_is_dir {
@@ -631,10 +678,14 @@ impl S3Storage for FileSystem {
         dir_queue.push_back(path.clone());
 
         while let Some(dir) = dir_queue.pop_front() {
-            let mut entries = trace_try!(fs::read_dir(dir).await);
+            let mut entries = trace_try!(fs::read_dir(&dir).await);
             loop {
                 let entry = trace_try!(entries.next_entry().await);
                 if let Some(entry) = entry {
+                    // hide the reserved bookkeeping dir at the bucket root
+                    if dir == path && entry.file_name().to_str() == Some(RESERVED_DIR) {
+                        continue;
+                    }
                     let file_type = trace_try!(entry.file_type().await);
                     if file_type.is_dir() {
                         dir_queue.push_back(entry.path());
@@ -720,6 +771,14 @@ impl S3Storage for FileSystem {
             code_error!(IncompleteBody,"You did not provide the number of bytes specified by the Content-Length HTTP header.")
         })?;
 
+        if key_under_reserved(&key) {
+            let err = code_error!(
+                AccessDenied,
+                format!("the \"{RESERVED_DIR}/\" key prefix is reserved for internal use")
+            );
+            return Err(err.into());
+        }
+
         if key.ends_with('/') {
             if content_length == Some(0) {
                 let object_path = trace_try!(self.get_object_path(&bucket, &key));
@@ -739,6 +798,12 @@ impl S3Storage for FileSystem {
             trace_try!(fs::create_dir_all(&dir_path).await);
         }
 
+        // write metadata before the object, so a metadata failure leaves nothing
+        // stored (a clean error) rather than a stored object plus a 500
+        if let Some(ref metadata) = metadata {
+            trace_try!(self.save_metadata(&bucket, &key, metadata).await);
+        }
+
         let mut md5_hash = Md5::new();
         let stream = body.inspect_ok(|bytes| md5_hash.update(bytes.as_ref()));
 
@@ -756,10 +821,6 @@ impl S3Storage for FileSystem {
             %md5_sum,
             "PutObject: write file",
         );
-
-        if let Some(ref metadata) = metadata {
-            trace_try!(self.save_metadata(&bucket, &key, metadata).await);
-        }
 
         let output = PutObjectOutput {
             e_tag: Some(format!("\"{}\"", md5_sum)),
@@ -793,6 +854,7 @@ impl S3Storage for FileSystem {
     ) -> S3StorageResult<UploadPartOutput, UploadPartError> {
         let UploadPartRequest {
             body,
+            bucket,
             upload_id,
             part_number,
             ..
@@ -802,8 +864,10 @@ impl S3Storage for FileSystem {
             code_error!(IncompleteBody, "You did not provide the number of bytes specified by the Content-Length HTTP header.")
         })?;
 
-        let file_path_str = format!(".upload_id-{}.part-{}", upload_id, part_number);
-        let file_path = trace_try!(Path::new(&file_path_str).absolutize_virtually(&self.root));
+        let file_path = trace_try!(self.get_part_path(&bucket, &upload_id, part_number));
+        if let Some(parent) = file_path.parent() {
+            trace_try!(fs::create_dir_all(parent).await);
+        }
 
         let mut md5_hash = Md5::new();
         let stream = body.inspect_ok(|bytes| md5_hash.update(bytes.as_ref()));
@@ -875,8 +939,7 @@ impl S3Storage for FileSystem {
                     "InvalidPartOrder"
                 )));
             }
-            let part_path_str = format!(".upload_id-{}.part-{}", upload_id, part_number);
-            let part_path = trace_try!(Path::new(&part_path_str).absolutize_virtually(&self.root));
+            let part_path = trace_try!(self.get_part_path(&bucket, &upload_id, part_number));
 
             let mut reader = trace_try!(File::open(&part_path).await);
             let (ret, duration) =
